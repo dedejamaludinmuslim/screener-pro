@@ -2,6 +2,7 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
+   - FIX: Supports Generated Column for foreign_net
 ========================================================= */
 
 /* =========================
@@ -343,7 +344,7 @@ elBtnAnalyze.onclick = async () => {
 };
 
 /* =========================
-   Supabase Ops (Standard)
+   Supabase Ops (FIXED)
 ========================= */
 async function upsertSymbols(rows) {
   // Use map to unique
@@ -356,10 +357,18 @@ async function upsertSymbols(rows) {
 async function upsertPrices(rows) {
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
+    // FIX: Send foreign_buy & foreign_sell, NOT foreign_net
     const part = rows.slice(i, i + CHUNK).map(r => ({
-      trade_date: r.trade_date, symbol: r.symbol,
-      open: r.open, high: r.high, low: r.low, close: r.close,
-      volume: r.volume, foreign_net: (r.foreign_buy || 0) - (r.foreign_sell || 0)
+      trade_date: r.trade_date, 
+      symbol: r.symbol,
+      open: r.open, 
+      high: r.high, 
+      low: r.low, 
+      close: r.close,
+      volume: r.volume, 
+      foreign_buy: r.foreign_buy || 0,
+      foreign_sell: r.foreign_sell || 0
+      // removed foreign_net key
     }));
     const { error } = await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" });
     if (error) throw error;
@@ -382,6 +391,7 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   let all = [];
   const CHUNK = 100; // split symbols
   for(let i=0; i<symbols.length; i+=CHUNK){
+    // Reading foreign_net is fine (calculated on read)
     const { data, error } = await sb.from("prices_daily")
       .select("trade_date,symbol,open,high,low,close,volume,foreign_net")
       .in("symbol", symbols.slice(i, i+CHUNK))
@@ -430,7 +440,6 @@ function rollingMax(v, p) {
   }
   return out;
 }
-// Simplified RSI & ATR for brevity (Logic same as before)
 function RSI(vals, p=14){
   const out=new Array(vals.length).fill(null);
   let g=0, l=0;
@@ -481,7 +490,7 @@ function scoreSwing(series) {
   if(sc>=65) sig="BUY"; else if(sc<=30) sig="SELL";
   if(C<M20 && R<45) { sig="SELL"; rs.unshift("Breakdown MA20"); }
 
-  return { signal: sig, score: Math.max(0, Math.min(100, sc)), reasons: rs, metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
+  return { signal: sig, score: Math.max(0, Math.min(100, Math.round(sc))), reasons: rs, metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
 }
 
 /* =========================
