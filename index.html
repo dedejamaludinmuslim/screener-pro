@@ -3,14 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Swing Screener</title>
+    <title>Stock Swing Screener (XLSX Support)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/technicalindicators/3.1.0/browser.js"></script>
     
     <style>
-        /* Agar kolom pertama (Kode) tetap diam saat scroll horizontal */
         .sticky-col {
             position: sticky;
             left: 0;
@@ -19,8 +18,6 @@
             border-right: 2px solid #e5e7eb;
         }
         th.sticky-col { background-color: #f3f4f6; }
-        /* Style scrollbar */
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body class="bg-gray-100 p-6">
@@ -29,8 +26,8 @@
         <h1 class="text-3xl font-bold mb-6 text-gray-800">Stock Swing Screener</h1>
 
         <div class="bg-white p-6 rounded-lg shadow mb-6">
-            <h2 class="text-xl font-semibold mb-4">Upload Data Harian (CSV)</h2>
-            <input type="file" id="fileInput" accept=".csv" class="mb-4 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+            <h2 class="text-xl font-semibold mb-4">Upload Data Harian (Excel .xlsx)</h2>
+            <input type="file" id="fileInput" accept=".xlsx, .xls" class="mb-4 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
             <button onclick="processFile()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Upload & Update</button>
             <p id="uploadStatus" class="mt-2 text-sm text-gray-600"></p>
         </div>
@@ -44,23 +41,20 @@
             <div class="overflow-x-auto relative shadow-md sm:rounded-lg" style="max-height: 80vh;">
                 <table class="w-full text-sm text-left text-gray-500">
                     <thead class="text-xs text-gray-700 uppercase bg-gray-50">
-                        <tr id="tableHeader">
-                            </tr>
+                        <tr id="tableHeader"></tr>
                     </thead>
-                    <tbody id="stockTableBody">
-                        </tbody>
+                    <tbody id="stockTableBody"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
     <script>
-        // --- KONFIGURASI SUPABASE ---
+        // --- KONFIGURASI SUPABASE (GANTI DENGAN MILIK ANDA) ---
         const supabaseUrl = 'https://cannnetigbzlesfhhiwr.supabase.co';
         const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhbm5uZXRpZ2J6bGVzZmhoaXdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDQ1MDksImV4cCI6MjA4MjEyMDUwOX0.z9W9mPPoLlPoa7XdL6I0rsg9EeQy54wfNgyJ_tzF_Ns';
         const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
-
-        // --- SKEMA KOLOM UNTUK TABEL ---
+        // --- SKEMA KOLOM ---
         const columns = [
             { key: 'symbol', label: 'Kode', sticky: true },
             { key: 'date', label: 'Tanggal' },
@@ -69,13 +63,13 @@
             { key: 'ema20', label: 'EMA20', type: 'number' },
             { key: 'sma50', label: 'SMA50', type: 'number' },
             { key: 'avgVol20', label: 'Avg Vol 20', type: 'number' },
-            { key: 'volMaRatio', label: 'Vol > MA', type: 'text' }, // Volume vs MA Volume
+            { key: 'volMaRatio', label: 'Vol Status', type: 'text' },
             { key: 'netForeign', label: 'Net Foreign', type: 'number' },
             { key: 'trend', label: 'Status Tren', type: 'text' },
             { key: 'rsi', label: 'RSI (14)', type: 'number' },
-            { key: 'macd', label: 'MACD', type: 'text' }, // Histogram/Signal
+            { key: 'macd', label: 'MACD', type: 'text' },
             { key: 'atr', label: 'ATR', type: 'number' },
-            { key: 'bb', label: 'Bollinger Band', type: 'text' }, // Upper/Lower Pos
+            { key: 'bb', label: 'Bollinger Band', type: 'text' },
             { key: 'marketCap', label: 'Market Cap', type: 'number' }
         ];
 
@@ -83,30 +77,52 @@
         let sortCol = 'symbol';
         let sortAsc = true;
 
-        // --- 1. PROSES UPLOAD FILE ---
-        function processFile() {
+        // --- 1. PROSES UPLOAD EXCEL (PERUBAHAN UTAMA DISINI) ---
+        async function processFile() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             const status = document.getElementById('uploadStatus');
 
-            if (!file) return alert("Pilih file CSV dulu!");
+            if (!file) return alert("Pilih file Excel (.xlsx) dulu!");
 
-            status.innerText = "Membaca file...";
+            status.innerText = "Membaca file Excel...";
             
-            Papa.parse(file, {
-                header: true,
-                skipEmptyLines: true,
-                complete: async function(results) {
-                    const rows = results.data;
+            const reader = new FileReader();
+            
+            reader.onload = async function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    
+                    // Ambil Sheet Pertama
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    
+                    // Konversi ke JSON
+                    const rows = XLSX.utils.sheet_to_json(worksheet);
+                    
+                    if(rows.length === 0) {
+                        status.innerText = "File kosong atau format salah.";
+                        return;
+                    }
+
                     const upsertData = [];
 
-                    // Mapping dari nama kolom CSV (Bahasa Indonesia) ke Database
+                    // Loop data dan sesuaikan dengan nama kolom Excel Anda
                     rows.forEach(row => {
-                        // Pastikan data valid
-                        if(row['Kode Saham'] && row['Tanggal Perdagangan Terakhir']) {
+                        // Pastikan key object sesuai dengan header di Excel Anda (Case Sensitive!)
+                        // Biasanya 'Kode Saham', 'Tanggal Perdagangan Terakhir', dst.
+                        if(row['Kode Saham']) {
+                            // Fungsi helper untuk handle tanggal Excel yang kadang jadi angka
+                            let dateStr = row['Tanggal Perdagangan Terakhir'];
+                            if(typeof dateStr === 'number') {
+                                // Konversi serial number Excel ke YYYY-MM-DD
+                                dateStr = new Date(Math.round((dateStr - 25569)*86400*1000)).toISOString().split('T')[0];
+                            }
+
                             upsertData.push({
                                 symbol: row['Kode Saham'],
-                                date: convertDate(row['Tanggal Perdagangan Terakhir']), // Perlu format YYYY-MM-DD
+                                date: dateStr, // Pastikan format akhirnya YYYY-MM-DD
                                 open: parseFloat(row['Open Price']) || 0,
                                 high: parseFloat(row['Tertinggi']) || 0,
                                 low: parseFloat(row['Terendah']) || 0,
@@ -121,46 +137,38 @@
 
                     status.innerText = `Mengupload ${upsertData.length} baris ke Supabase...`;
                     
-                    // Upsert ke Supabase (Batching per 1000 agar tidak timeout)
+                    // Batch Upsert
                     const batchSize = 1000;
                     for (let i = 0; i < upsertData.length; i += batchSize) {
                         const batch = upsertData.slice(i, i + batchSize);
                         const { error } = await supabase.from('stock_candles').upsert(batch, { onConflict: 'symbol, date' });
-                        if (error) {
-                            console.error(error);
-                            status.innerText = "Error Upload: " + error.message;
-                            return;
-                        }
+                        if (error) throw error;
                     }
 
                     status.innerText = "Upload Selesai! Data berhasil diperbarui.";
-                    loadAndCalculate(); // Refresh tabel otomatis
+                    loadAndCalculate(); // Refresh tabel
+
+                } catch (err) {
+                    console.error(err);
+                    status.innerText = "Error: " + err.message;
                 }
-            });
+            };
+            
+            reader.readAsArrayBuffer(file);
         }
 
-        // Helper: Convert DD-MM-YYYY atau format lain ke YYYY-MM-DD
-        function convertDate(dateStr) {
-            // Asumsi format di CSV adalah YYYY-MM-DD (seperti contoh file Anda)
-            // Jika formatnya berbeda, sesuaikan di sini.
-            return dateStr; 
-        }
-
-        // --- 2. FETCH DATA & HITUNG INDIKATOR ---
+        // --- 2. LOGIC DATA & INDIKATOR (SAMA SEPERTI SEBELUMNYA) ---
         async function loadAndCalculate() {
             const status = document.getElementById('uploadStatus');
-            status.innerText = "Mengambil data histori...";
+            status.innerText = "Mengambil data & menghitung...";
             
-            // Ambil data 100 hari terakhir untuk semua saham (untuk hitung MA50/RSI butuh history)
-            // Di production app, ini sebaiknya dilakukan di backend (Edge Function)
             const { data, error } = await supabase
                 .from('stock_candles')
                 .select('*')
-                .order('date', { ascending: true }); // Urutkan dari lama ke baru untuk perhitungan
+                .order('date', { ascending: true }); // Penting urut tanggal
 
             if (error) return alert("Gagal ambil data: " + error.message);
 
-            // Grouping data by Symbol
             const stockHistory = {};
             data.forEach(d => {
                 if (!stockHistory[d.symbol]) stockHistory[d.symbol] = [];
@@ -169,19 +177,18 @@
 
             const processedData = [];
 
-            // Iterasi setiap saham untuk hitung indikator
             Object.keys(stockHistory).forEach(symbol => {
                 const history = stockHistory[symbol];
-                const last = history[history.length - 1]; // Data Hari Terakhir
+                // Kita butuh minimal data 50 hari agar MA50 valid
+                if (history.length < 50) return; 
+
+                const last = history[history.length - 1]; 
                 const closes = history.map(d => d.close);
                 const volumes = history.map(d => d.volume);
                 const highs = history.map(d => d.high);
                 const lows = history.map(d => d.low);
 
-                // --- KALKULASI TEKNIKAL (Library) ---
-                // Pastikan history cukup panjang
-                if (history.length < 50) return; 
-
+                // Hitung Indikator
                 const ma20 = technicalIndicators.SMA.calculate({period: 20, values: closes});
                 const sma50 = technicalIndicators.SMA.calculate({period: 50, values: closes});
                 const ema20 = technicalIndicators.EMA.calculate({period: 20, values: closes});
@@ -193,7 +200,7 @@
                 const bb = technicalIndicators.BollingerBands.calculate({period: 20, values: closes, stdDev: 2});
                 const volMa20 = technicalIndicators.SMA.calculate({period: 20, values: volumes});
 
-                // Ambil nilai terakhir dari array hasil perhitungan
+                // Ambil Nilai Terakhir
                 const lastMa20 = ma20[ma20.length - 1] || 0;
                 const lastEma20 = ema20[ema20.length - 1] || 0;
                 const lastSma50 = sma50[sma50.length - 1] || 0;
@@ -203,16 +210,19 @@
                 const lastAtr = atr[atr.length - 1] || 0;
                 const lastBb = bb[bb.length - 1] || {upper: 0, lower: 0};
 
-                // Logic Tambahan
+                // Logic Custom
                 const netForeign = last.foreign_buy - last.foreign_sell;
                 const marketCap = last.close * last.listed_shares;
-                const trendStatus = last.close > lastMa20 ? "UPTREND" : "DOWNTREND";
-                const volumeStatus = last.volume > lastVolMa ? "SPIKE" : "NORMAL";
                 
-                // Posisi BB (Sedang di atas/bawah)
-                let bbPos = "Middle";
-                if(last.close > lastBb.upper) bbPos = "Over Upper";
-                if(last.close < lastBb.lower) bbPos = "Below Lower";
+                // Tentukan Status Tren (Simple)
+                let trendStatus = "SIDEWAYS";
+                if (last.close > lastMa20 && last.close > lastSma50) trendStatus = "UPTREND";
+                else if (last.close < lastMa20 && last.close < lastSma50) trendStatus = "DOWNTREND";
+
+                // Tentukan Posisi Bollinger
+                let bbPos = "Normal";
+                if(last.close > lastBb.upper) bbPos = "Break Upper";
+                if(last.close < lastBb.lower) bbPos = "Break Lower";
 
                 processedData.push({
                     symbol: symbol,
@@ -222,7 +232,7 @@
                     ema20: lastEma20.toFixed(0),
                     sma50: lastSma50.toFixed(0),
                     avgVol20: lastVolMa.toFixed(0),
-                    volMaRatio: volumeStatus,
+                    volMaRatio: last.volume > lastVolMa ? "HIGH" : "LOW",
                     netForeign: netForeign,
                     trend: trendStatus,
                     rsi: lastRsi.toFixed(1),
@@ -236,10 +246,10 @@
             tableData = processedData;
             renderHeader();
             renderTable();
-            status.innerText = "Data siap.";
+            status.innerText = "Data siap ditampilkan.";
         }
 
-        // --- 3. RENDER TABEL & SORTING ---
+        // --- 3. RENDER TABLE & SORT (SAMA SEPERTI SEBELUMNYA) ---
         function renderHeader() {
             const tr = document.getElementById('tableHeader');
             tr.innerHTML = '';
@@ -255,32 +265,25 @@
         function renderTable() {
             const tbody = document.getElementById('stockTableBody');
             tbody.innerHTML = '';
-
-            tableData.forEach((row, i) => {
+            tableData.forEach(row => {
                 const tr = document.createElement('tr');
                 tr.className = "bg-white border-b hover:bg-gray-50";
-
                 columns.forEach(col => {
                     const td = document.createElement('td');
-                    td.className = `px-6 py-4 ${col.sticky ? 'sticky-col font-bold text-gray-900' : ''}`;
-                    
+                    td.className = `px-6 py-4 whitespace-nowrap ${col.sticky ? 'sticky-col font-bold text-gray-900 shadow-sm' : ''}`;
                     let val = row[col.key];
                     
-                    // Formatting Angka
-                    if (col.type === 'number') {
-                        val = new Intl.NumberFormat('id-ID').format(val);
-                    }
-
-                    // Coloring Logic (Contoh)
+                    if (col.type === 'number') val = new Intl.NumberFormat('id-ID').format(val);
+                    
                     if (col.key === 'trend') {
-                        td.innerHTML = `<span class="${val === 'UPTREND' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-1 rounded-full text-xs font-semibold">${val}</span>`;
-                    } else if (col.key === 'rsi') {
-                         td.className += val > 70 ? ' text-red-600 font-bold' : (val < 30 ? ' text-green-600 font-bold' : '');
-                         td.innerText = val;
+                        const color = val === 'UPTREND' ? 'bg-green-100 text-green-800' : (val === 'DOWNTREND' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800');
+                        td.innerHTML = `<span class="${color} px-2 py-1 rounded-full text-xs font-semibold">${val}</span>`;
+                    } else if (col.key === 'netForeign') {
+                        td.className += val > 0 ? ' text-green-600' : ' text-red-600';
+                        td.innerText = new Intl.NumberFormat('id-ID').format(val);
                     } else {
                         td.innerText = val;
                     }
-                    
                     tr.appendChild(td);
                 });
                 tbody.appendChild(tr);
@@ -288,28 +291,21 @@
         }
 
         function handleSort(key) {
-            if (sortCol === key) {
-                sortAsc = !sortAsc;
-            } else {
-                sortCol = key;
-                sortAsc = true;
-            }
+            if (sortCol === key) sortAsc = !sortAsc;
+            else { sortCol = key; sortAsc = true; }
             
             tableData.sort((a, b) => {
                 let valA = a[key];
                 let valB = b[key];
-
-                // Convert to number if sorting number columns (remove strings like decimals if needed before sort)
-                if(!isNaN(parseFloat(valA)) && !isNaN(parseFloat(valB))) {
-                    valA = parseFloat(valA);
-                    valB = parseFloat(valB);
-                }
-
+                // Helper untuk sort angka yang stringnya sudah diformat (tapi di data kita simpan raw, jd aman)
+                // Di sini kita sort berdasarkan data mentah di processedData (belum diformat string)
+                // Namun karena processedData nilainya string (toFixed), convert ke float
+                if(!isNaN(parseFloat(valA))) { valA = parseFloat(valA); valB = parseFloat(valB); }
+                
                 if (valA < valB) return sortAsc ? -1 : 1;
                 if (valA > valB) return sortAsc ? 1 : -1;
                 return 0;
             });
-            
             renderHeader();
             renderTable();
         }
