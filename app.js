@@ -84,13 +84,24 @@ function int(x) {
   return n === null ? null : Math.trunc(n);
 }
 
-async function readXlsx(file) {
-  const data = await file.arrayBuffer();
-  const wb = window.XLSX.read(data, { type: "array" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const json = window.XLSX.utils.sheet_to_json(sheet, { defval: null });
+async function readCsv(file){
+  if (!window.Papa) throw new Error("PapaParse gagal ter-load.");
 
-  const cleaned = json
+  const text = await file.text(); // CSV = text, aman tanpa library aneh-aneh
+  const parsed = window.Papa.parse(text, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: false, // kita handle num/int sendiri
+  });
+
+  if (parsed.errors?.length) {
+    // tampilkan 1 error paling atas biar jelas
+    throw new Error(parsed.errors[0].message || "CSV parse error");
+  }
+
+  const rowsRaw = parsed.data || [];
+
+  const cleaned = rowsRaw
     .filter(r => r["Kode Saham"])
     .map(r => {
       const tradeDateISO = parseIDXDateToISO(r["Tanggal Perdagangan Terakhir"]);
@@ -454,7 +465,7 @@ elFileInput.onchange = async (e) => {
 
   try{
     toast("membaca xlsx…");
-    const parsed = await readXlsx(file);
+    const parsed = await readCsv(file);
     lastParsed = parsed;
 
     elPillDate.textContent = `Trade date: ${parsed.tradeDateISO || "-"}`;
