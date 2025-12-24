@@ -3,23 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Swing Signals — XLSX → Supabase</title>
+  <title>Swing Signals — CSV → Supabase</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="./styles.css" />
-
-  <!-- Supabase -->
-  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
-  <!-- XLSX parser (SheetJS) -->
-  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
-  
-  <!-- App -->
-  <script defer src="./app.js"></script>
-
 </head>
 
 <body>
@@ -29,25 +19,24 @@
         <div class="logo">Σ</div>
         <div>
           <div class="title">Swing Signals</div>
-          <div class="subtitle">Upload .xlsx harian → simpan histori → deteksi sinyal swing</div>
+          <div class="subtitle">Upload CSV harian → simpan histori → deteksi sinyal swing</div>
         </div>
       </div>
       <div class="top-actions"></div>
     </header>
 
     <section id="mainCard" class="card">
-      <div class="card-title">Upload Data Harian (.xlsx)</div>
+      <div class="card-title">Upload Data Harian (.csv)</div>
 
       <div class="row wrap">
         <label class="file">
-          <input id="fileInput" type="file" accept=".xlsx" />
-          <span class="btn">Pilih File .xlsx</span>
+          <input id="fileInput" type="file" accept=".csv,text/csv" />
+          <span class="btn">Pilih File .csv</span>
         </label>
 
         <button id="btnUpload" class="btn" disabled>Upload → Supabase</button>
         <button id="btnAnalyze" class="btn ghost" disabled>Analisis Swing</button>
-        <button id="btnRefresh" class="btn ghost">Refresh</button>
-      </div>
+        </div>
 
       <div class="row wrap">
         <div class="pill" id="pillStatus">Status: menunggu file</div>
@@ -55,39 +44,27 @@
         <div class="pill mono" id="pillRows">Rows: -</div>
       </div>
 
-      <div class="split">
-        <div class="panel">
-          <div class="panel-title">Preview (10 baris)</div>
-          <div class="table-wrap">
-            <table class="table" id="previewTable">
-              <thead></thead>
-              <tbody></tbody>
-            </table>
-          </div>
+      <div class="panel panel-full">
+        <div class="panel-title">Sinyal Swing (Top)</div>
+        <div class="row wrap">
+          <input id="search" class="search" placeholder="Cari simbol…" />
+          <select id="filterSignal" class="select">
+            <option value="ALL">Semua</option>
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+            <option value="WAIT">WAIT</option>
+          </select>
         </div>
 
-        <div class="panel">
-          <div class="panel-title">Sinyal Swing (Top)</div>
-          <div class="row wrap">
-            <input id="search" class="search" placeholder="Cari simbol…" />
-            <select id="filterSignal" class="select">
-              <option value="ALL">Semua</option>
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
-              <option value="WAIT">WAIT</option>
-            </select>
-          </div>
+        <div class="table-wrap">
+          <table class="table" id="signalsTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
 
-          <div class="table-wrap">
-            <table class="table" id="signalsTable">
-              <thead></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-
-          <div class="hint">
-            Sinyal = rule-based scoring untuk disiplin swing, bukan ramalan.
-          </div>
+        <div class="hint">
+          Sinyal = rule-based scoring untuk disiplin swing, bukan ramalan.
         </div>
       </div>
     </section>
@@ -98,5 +75,9 @@
       <span class="dim">Upload → Histori → Skor</span>
     </footer>
   </div>
+
+  <!-- Supabase (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
