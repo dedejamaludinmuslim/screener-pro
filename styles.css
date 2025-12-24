@@ -21,7 +21,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 /* LAYOUT UTAMA */
 .app { display: grid; grid-template-columns: 240px 1fr; height: 100%; }
 
-/* SIDEBAR (DESKTOP) */
+/* SIDEBAR & HEADER ELEMENTS */
 .sidebar {
   background: var(--sidebar); border-right: 1px solid var(--border);
   padding: 24px; display: flex; flex-direction: column; gap: 24px;
@@ -40,7 +40,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .stat-item .label { font-size: 10px; color: var(--dim); letter-spacing: 1px; font-weight: 600; margin-bottom: 4px; }
 .stat-item .value { font-size: 13px; font-weight: 500; color: #fff; word-break: break-all; }
 
-/* CONTROL AREA (Buttons) */
+/* Control Area */
 .control-area { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
 .admin-buttons { display: flex; flex-direction: column; gap: 8px; }
 .auth-buttons { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 12px; }
@@ -69,7 +69,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 }
 .btn-action:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px var(--accent-glow); }
 .btn-action:disabled { background: var(--border); color: var(--dim); box-shadow: none; }
-
 .btn-login { border: 1px solid var(--border); color: #fff; }
 .btn-logout { border: 1px solid var(--sell); color: var(--sell); }
 
@@ -87,7 +86,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .tool-section.center { justify-content: center; flex: 2; }
 .tool-section.end { justify-content: flex-end; flex: 1; }
 
-/* INPUTS */
 .input-wrap { 
   display: flex; align-items: center; gap: 8px; 
   background: var(--card); padding: 8px 12px; 
@@ -99,8 +97,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .filter-group { display: flex; gap: 10px; }
 .filter-group select {
   background: var(--card); color: #fff; border: 1px solid var(--border); 
-  padding: 8px 12px; border-radius: 8px; outline: none; font-size: 13px; cursor: pointer;
-  width: auto;
+  padding: 8px 12px; border-radius: 8px; outline: none; font-size: 13px; cursor: pointer; width: auto;
 }
 
 .slider-group { 
@@ -112,22 +109,37 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 }
 input[type=range] { accent-color: var(--accent); width: 100px; cursor: pointer; }
 
-/* TABLE */
+/* TABLE STRUCTURE */
 .table-container { flex: 1; overflow: auto; position: relative; scroll-behavior: smooth; }
 .table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+
+/* Table Headers & Cells General */
+.table th, .table td {
+  padding: 12px 16px; 
+  border-bottom: 1px solid var(--border); 
+  vertical-align: middle; 
+  white-space: nowrap;
+  text-align: center; /* DEFAULT CENTER ALL */
+}
+
 .table th {
   position: sticky; top: 0; background: var(--bg); z-index: 20;
-  text-align: left; padding: 12px 16px; color: var(--dim); font-size: 11px; font-weight: 600; text-transform: uppercase;
-  border-bottom: 1px solid var(--border); white-space: nowrap;
+  color: var(--dim); font-size: 11px; font-weight: 600; text-transform: uppercase;
 }
-.table td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: #ccc; vertical-align: middle; white-space: nowrap; }
+.table td { color: #ccc; }
 .table tbody tr:hover td { background: var(--card); color: #fff; }
 
-/* Sticky Columns */
-.table th:nth-child(1), .table td:nth-child(1) { position: sticky; left: 0; z-index: 15; background: var(--bg); width: 40px; text-align: center; border-right: 1px solid var(--border); }
-.table th:nth-child(2), .table td:nth-child(2) { position: sticky; left: 40px; z-index: 15; background: var(--bg); width: 100px; border-right: 1px solid var(--border); }
-.table thead th:nth-child(1), .table thead th:nth-child(2) { z-index: 25; }
-.table tbody tr:hover td:nth-child(1), .table tbody tr:hover td:nth-child(2) { background: var(--card); }
+/* STICKY COLUMNS DESKTOP DEFAULT */
+.table .col-star { position: sticky; left: 0; z-index: 15; background: var(--bg); width: 40px; border-right: 1px solid var(--border); }
+.table .col-symbol { position: sticky; left: 40px; z-index: 15; background: var(--bg); width: 100px; border-right: 1px solid var(--border); }
+.table thead th.col-star, .table thead th.col-symbol { z-index: 25; }
+
+/* ALIGNMENT OVERRIDES */
+.text-left { text-align: left !important; }
+.text-center { text-align: center !important; }
+
+/* REASONS COLUMN (WIDE) */
+.col-reasons { min-width: 300px; white-space: normal !important; line-height: 1.4; }
 
 /* Elements */
 .mono { font-family: var(--font-mono); }
@@ -137,11 +149,10 @@ input[type=range] { accent-color: var(--accent); width: 100px; cursor: pointer; 
 .badge.wait { color: var(--dim); border: 1px solid var(--border); }
 .star-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: #333; transition: .2s; padding:0; }
 .star-btn.active { color: gold; text-shadow: 0 0 8px rgba(255, 215, 0, 0.5); transform: scale(1.2); }
-.new-tag { font-size: 9px; background: var(--accent); color: #fff; padding: 2px 4px; border-radius: 2px; margin-left: 4px; vertical-align: middle; }
+.new-tag { font-size: 9px; background: var(--accent); color: #fff; padding: 1px 3px; border-radius: 2px; margin-left: 3px; vertical-align: middle; }
 .highlight { color: var(--accent); font-weight: 700; }
-.table td:last-child { min-width: 300px; white-space: normal; line-height: 1.4; color: #888; font-size: 12px; }
 
-/* --- FITUR LOGIN & SECURITY --- */
+/* MODAL & SECURITY */
 .modal-overlay {
   position: fixed; top: 0; left: 0; width: 100%; height: 100%;
   background: rgba(0,0,0,0.8); z-index: 1000;
@@ -151,8 +162,7 @@ input[type=range] { accent-color: var(--accent); width: 100px; cursor: pointer; 
 .modal-content {
   background: var(--card); border: 1px solid var(--border);
   padding: 24px; border-radius: 12px; width: 90%; max-width: 320px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-  text-align: center; /* ALIGN CENTER LABEL LOGIN */
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5); text-align: center;
 }
 .modal-content h3 { margin-top: 0; margin-bottom: 20px; color: #fff; }
 .modal-input {
@@ -161,64 +171,51 @@ input[type=range] { accent-color: var(--accent); width: 100px; cursor: pointer; 
   color: #fff; border-radius: 8px; outline: none; text-align: center;
 }
 .modal-input:focus { border-color: var(--accent); }
-
 .modal-actions { display: flex; gap: 10px; margin-top: 10px; }
 .modal-actions button { flex: 1; }
 
-.locked-cell { color: var(--dim); display: flex; align-items: center; justify-content: center; height: 100%; }
-.locked-icon { font-size: 16px; opacity: 0.5; filter: grayscale(1); }
+.locked-cell { color: var(--dim); display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; }
+.locked-icon { font-size: 14px; opacity: 0.5; filter: grayscale(1); }
 .sort-disabled { cursor: not-allowed !important; color: var(--dim) !important; opacity: 0.5; }
 
 /* =========================================
-   MOBILE RESPONSIVE FIX (MAX-WIDTH 768px)
+   MOBILE RESPONSIVE (POLESAN KHUSUS)
 ========================================= */
 @media (max-width: 768px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
 
-  /* HEADER COMPACT & FLEXIBLE */
+  /* COMPACT HEADER */
   .sidebar {
-    flex-direction: row; flex-wrap: wrap; /* WRAP AGAR TIDAK GEPENG */
-    align-items: center; justify-content: space-between;
-    padding: 12px 16px; gap: 10px; height: auto; border-right: none; border-bottom: 1px solid var(--border);
+    padding: 10px 16px; gap: 10px; border-right: none; border-bottom: 1px solid var(--border);
+    flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; height: auto;
   }
   .brand-text, .stats-panel { display: none; }
   
-  /* CONTROL AREA (Header Right) */
-  .control-area { 
-    margin-top: 0; flex-direction: row; align-items: center; gap: 8px; 
-    flex: 1; justify-content: flex-end;
-  }
-  
-  /* Saat Admin Buttons Muncul di Mobile */
-  .admin-buttons { 
-    flex-direction: row; gap: 6px; 
-  }
-  .admin-buttons span { display: none; } /* Sembunyikan teks Upload biar muat */
-  
+  .control-area { margin-top: 0; flex-direction: row; align-items: center; gap: 8px; flex: 1; justify-content: flex-end; }
+  .admin-buttons { flex-direction: row; gap: 6px; }
+  .admin-buttons span { display: none; } /* Hide 'Upload' text */
   .auth-buttons { margin-top: 0; border-top: none; padding-top: 0; }
-  
-  /* TOOLBAR STACK (Vertical) */
-  .toolbar { 
-    flex-direction: column; 
-    align-items: stretch; 
-    gap: 12px; 
-    padding: 12px 16px;
-    height: auto;
-  }
-  
-  .tool-section { width: 100%; display: flex; justify-content: center; }
-  
-  /* Grid Filter */
-  .filter-group { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .filter-group select { width: 100%; text-align: center; }
-  .input-wrap { max-width: 100%; }
+  #btnLogin, #btnLogout { padding: 6px 12px; font-size: 11px; }
 
-  /* Slider */
+  /* TOOLBAR MOBILE */
+  .toolbar { 
+    flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 16px; height: auto;
+  }
+  .tool-section.start, .tool-section.center, .tool-section.end { justify-content: center; flex: 0 0 auto; width: 100%; }
+  
+  .filter-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .filter-group select { width: 100%; text-align: center; }
   .slider-group { width: 100%; justify-content: space-between; }
   input[type=range] { flex: 1; }
 
-  /* Table Fix */
-  .table th, .table td { padding: 10px 8px; font-size: 12px; }
-  .table th:nth-child(1), .table td:nth-child(1) { width: 35px; }
-  .table th:nth-child(2), .table td:nth-child(2) { left: 35px; width: 80px; }
+  /* TABLE MOBILE POLISH */
+  .table { font-size: 12px; }
+  .table th, .table td { padding: 10px 6px; /* Lebih rapat paddingnya */ }
+
+  /* Sticky Width Adjustment for Mobile */
+  .table .col-star { width: 32px !important; }
+  .table .col-symbol { left: 32px !important; width: 75px !important; }
+  
+  /* Badge Kecil */
+  .badge { padding: 3px 6px; font-size: 10px; }
 }
