@@ -3,82 +3,86 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Swing Signals — CSV → Supabase</title>
-
+  <title>Swing Signals Pro</title>
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  
   <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body>
   <div class="app">
-    <header class="topbar">
+    <aside class="sidebar">
       <div class="brand">
         <div class="logo">Σ</div>
-        <div>
-          <div class="title">Swing Signals</div>
-          <div class="subtitle">Batch Processing Support</div>
+        <div class="brand-text">Swing<br><span class="highlight">Pro</span></div>
+      </div>
+      
+      <div class="stats-panel">
+        <div class="stat-item">
+          <div class="label">DATE</div>
+          <div class="value mono" id="pillDate">-</div>
+        </div>
+        <div class="stat-item">
+          <div class="label">ROWS</div>
+          <div class="value mono" id="pillRows">-</div>
+        </div>
+        <div class="stat-item">
+           <div class="label">STATUS</div>
+           <div class="value" id="pillStatus">Ready</div>
         </div>
       </div>
-      <div class="top-actions"></div>
-    </header>
 
-    <section id="mainCard" class="card">
-      <div class="card-title">Upload Data Harian (.csv / .xlsx)</div>
-
-      <div class="row wrap">
-        <label class="file">
-          <input id="fileInput" type="file" multiple accept=".csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-          <span class="btn">Pilih File (Bisa Banyak)</span>
+      <div class="control-group">
+        <label class="btn-primary-upload">
+          <input id="fileInput" type="file" multiple accept=".csv,.xlsx" />
+          <span>📂 Upload Data</span>
         </label>
-
-        <button id="btnConvert" class="btn ghost" disabled>Convert & Zip</button>
-        
-        <button id="btnUpload" class="btn" disabled>Upload → Supabase</button>
-        <button id="btnAnalyze" class="btn ghost" disabled>Analisis Swing</button>
+        <button id="btnConvert" class="btn-ghost" disabled>Convert & Zip</button>
+        <button id="btnUpload" class="btn-ghost" disabled>Push DB</button>
+        <button id="btnAnalyze" class="btn-action" disabled>⚡ Analisis</button>
       </div>
+    </aside>
 
-      <div class="row wrap">
-        <div class="pill" id="pillStatus">Status: menunggu file</div>
-        <div class="pill mono" id="pillDate">Trade date: -</div>
-        <div class="pill mono" id="pillRows">Rows: -</div>
-      </div>
-
-      <div class="panel panel-full">
-        <div class="panel-title">Sinyal Swing (Top)</div>
-        <div class="row wrap">
-          <input id="search" class="search" placeholder="Cari simbol…" />
-          <select id="filterSignal" class="select">
-            <option value="ALL">Semua</option>
-            <option value="BUY">BUY</option>
-            <option value="SELL">SELL</option>
-            <option value="WAIT">WAIT</option>
-          </select>
+    <main class="main">
+      <header class="toolbar">
+        <div class="tool-left">
+          <div class="input-wrap">
+            <span class="icon">🔍</span>
+            <input id="search" placeholder="Cari emiten..." />
+          </div>
+          
+          <div class="filter-group">
+            <label>Signal:</label>
+            <select id="filterSignal">
+              <option value="ALL">Semua</option>
+              <option value="BUY">BUY Only</option>
+              <option value="SELL">SELL</option>
+              <option value="WAIT">WAIT</option>
+              <option value="WATCHLIST">★ Watchlist</option>
+            </select>
+          </div>
         </div>
 
-        <div class="table-wrap">
-          <table class="table" id="signalsTable">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
+        <div class="tool-right">
+          <div class="slider-group">
+            <label>Min Score: <span id="scoreVal" class="mono">0</span></label>
+            <input type="range" id="scoreSlider" min="0" max="95" value="0" step="5">
+          </div>
         </div>
+      </header>
 
-        <div class="hint">
-          Jika upload banyak file (bulk), analisis akan dilakukan berdasarkan tanggal terbaru yang ditemukan.
-        </div>
+      <div class="table-container">
+        <table class="table" id="signalsTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
       </div>
-    </section>
-
-    <footer class="footer">
-      <span class="mono">SWING_V1</span>
-      <span>•</span>
-      <span class="dim">Upload → Histori → Skor</span>
-    </footer>
+    </main>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
