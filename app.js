@@ -2,8 +2,8 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
-   - FIX: Supports Generated Column (foreign_net)
-   - FIX: ADAPTIVE SCORING (Calculates score even without MA50)
+   - FIX: Analisis Ulang tanpa perlu Upload File
+   - FIX: Mengambil semua simbol dari DB saat analisis
 ========================================================= */
 
 /* =========================
@@ -34,6 +34,7 @@ let lastParsed = { tradeDateISO: null, rows: [] };
 let cachedSignals = [];
 let cachedSignalsDate = null;
 let tempXlsxFiles = []; 
+let latestDbDate = null; // Menyimpan tanggal terakhir dari DB
 
 /* =========================
    Sorting & Utils
@@ -183,7 +184,7 @@ async function processBatchCsvFiles(files) {
   elPillRows.textContent = `Total Rows: ${allRows.length.toLocaleString("id-ID")}`;
   
   elBtnUpload.disabled = allRows.length === 0;
-  elBtnAnalyze.disabled = allRows.length === 0;
+  // Enable analyze button if we have uploadable data OR if DB has data (handled in refreshSignals)
   if(tempXlsxFiles.length === 0) elBtnConvert.disabled = true;
 
   return allRows.length;
@@ -201,7 +202,7 @@ elFileInput.onchange = async (e) => {
 
   elBtnConvert.disabled = tempXlsxFiles.length === 0;
   elBtnUpload.disabled = true;
-  elBtnAnalyze.disabled = true;
+  elBtnAnalyze.disabled = true; 
   elPillStatus.textContent = "Status: Memeriksa file...";
 
   if (tempXlsxFiles.length > 0) {
@@ -211,6 +212,8 @@ elFileInput.onchange = async (e) => {
       toast(`Membaca ${csvFiles.length} file CSV...`);
       const count = await processBatchCsvFiles(csvFiles);
       toast(`Siap upload (${count} baris data).`);
+      // Enable analyze if we have parsed data
+      if (count > 0) elBtnAnalyze.disabled = false;
     } catch(err) {
       console.error(err);
       toast("Gagal baca CSV: " + err.message, true);
@@ -243,8 +246,10 @@ elBtnConvert.onclick = async () => {
     document.body.removeChild(a);
 
     toast("Memuat data hasil konversi...");
-    await processBatchCsvFiles(convertedCsvBlobs);
+    const count = await processBatchCsvFiles(convertedCsvBlobs);
     toast("Konversi selesai & Data siap upload!");
+    if(count > 0) elBtnAnalyze.disabled = false;
+    
     tempXlsxFiles = []; 
     elBtnConvert.disabled = true;
   } catch (err) {
@@ -264,6 +269,7 @@ elBtnUpload.onclick = async () => {
 
     cachedSignals = []; 
     toast(`Upload sukses (${rows.length} baris).`);
+    // After upload, update latestDbDate and refresh
     await refreshSignals();
   } catch(err) {
     console.error(err);
@@ -273,13 +279,37 @@ elBtnUpload.onclick = async () => {
 
 elBtnAnalyze.onclick = async () => {
   try {
-    const { tradeDateISO, rows } = lastParsed;
-    if (!tradeDateISO) return;
+    // 1. Determine Target Date: From upload OR from latest DB
+    let targetDate = lastParsed.tradeDateISO;
+    if (!targetDate) {
+       targetDate = latestDbDate; // Use DB date if no file uploaded
+    }
     
-    const symbols = [...new Set(rows.map(r => r.symbol))];
+    if (!targetDate) {
+      toast("Tidak ada tanggal untuk dianalisis.", true);
+      return;
+    }
     
-    toast(`Analisis per tanggal: ${tradeDateISO} (Lookback 160 hari)`);
-    const history = await fetchHistoryForSymbols(symbols, tradeDateISO, 160);
+    // 2. Determine Symbols: From upload OR fetch all from DB for that date
+    let symbols = [];
+    if (lastParsed.rows.length > 0 && lastParsed.tradeDateISO === targetDate) {
+       symbols = [...new Set(lastParsed.rows.map(r => r.symbol))];
+    } else {
+       toast(`Mengambil daftar simbol untuk ${targetDate}...`);
+       const { data: symData, error } = await sb.from("prices_daily")
+         .select("symbol")
+         .eq("trade_date", targetDate);
+       if(error) throw error;
+       symbols = symData.map(s => s.symbol);
+    }
+    
+    if (symbols.length === 0) {
+      toast("Tidak ada simbol ditemukan.", true);
+      return;
+    }
+
+    toast(`Analisis ${symbols.length} saham per: ${targetDate} (Lookback 160 hari)`);
+    const history = await fetchHistoryForSymbols(symbols, targetDate, 160);
 
     const bySym = new Map();
     history.forEach(r => {
@@ -291,18 +321,18 @@ elBtnAnalyze.onclick = async () => {
     const out = [];
     for (const [sym, series] of bySym.entries()) {
       series.sort((a,b) => a.trade_date.localeCompare(b.trade_date));
-      if (series[series.length - 1]?.trade_date !== tradeDateISO) continue;
+      if (series[series.length - 1]?.trade_date !== targetDate) continue;
 
       const res = scoreSwing(series);
       const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val;
 
       out.push({
-        trade_date: tradeDateISO,
+        trade_date: targetDate,
         symbol: sym,
         strategy: "SWING_V1",
         signal: res.signal,
         score: res.score,
-        reasons: res.reasons, // Array of strings
+        reasons: res.reasons,
         close: safe(res.metrics.close), 
         rsi14: safe(res.metrics.rsi14), 
         ma20: safe(res.metrics.ma20), 
@@ -387,9 +417,6 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
 }
 
 async function fetchLatestTradeDate() {
-  const { data: sData } = await sb.from("signals_daily").select("trade_date").eq("strategy", "SWING_V1").order("trade_date", {ascending:false}).limit(1);
-  if (sData && sData.length > 0) return sData[0].trade_date;
-  
   const { data: pData } = await sb.from("prices_daily").select("trade_date").order("trade_date", {ascending:false}).limit(1);
   return pData?.[0]?.trade_date;
 }
@@ -446,10 +473,6 @@ function ATR(h,l,c,p=14){
   return out;
 }
 
-/* ========================================================
-   ADAPTIVE SCORING LOGIC
-   - Allows scoring even if MA50 is missing
-======================================================== */
 function scoreSwing(series) {
   const i = series.length - 1;
   const last = series[i], prev = series[i-1];
@@ -465,7 +488,6 @@ function scoreSwing(series) {
   const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i];
   const VR = (VM && VM>0) ? V/VM : 0;
   
-  // MINIMAL REQUIREMENT: RSI(14) - if less than 14 days, cannot score at all.
   if(!R || !A) {
     return { 
       signal: "WAIT", 
@@ -476,39 +498,26 @@ function scoreSwing(series) {
   }
 
   let sc = 0, rs = [];
-
-  // 1. TREND (MA50) - Optional Check
   if (M50) {
     if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
     if(M20 && M20>M50) { sc+=10; rs.push("MA20>MA50"); }
-  } else {
-    // Info note, no score added
-    // rs.push("No MA50 data"); 
   }
-
-  // 2. MOMENTUM (RSI)
   if(R>=45 && R<=70) { sc+=15; rs.push("RSI Sehat"); }
   else if(R>70) { sc-=8; rs.push("RSI Overbought"); }
   else if(R<40) { sc-=10; rs.push("RSI Weak"); }
 
-  // 3. BREAKOUT (High 20)
   if(H20 && C >= H20*0.995) { sc+=20; rs.push("Near Breakout"); }
 
-  // 4. VOLUME
   if(VR >= 1.3) { sc+=15; rs.push(`Vol Kuat (${VR.toFixed(1)}x)`); }
   else if(VR < 0.8) { sc-=6; }
 
-  // 5. FOREIGN
   if(FNET > 0) { sc+=10; rs.push("Net Buy Asing"); }
   else if(FNET < 0) { sc-=5; }
 
-  // 6. PRICE ACTION
   if (prev && C > prev.close) { sc+=3; }
 
   let sig = "WAIT";
   if(sc>=65) sig="BUY"; else if(sc<=30) sig="SELL";
-  
-  // Exit Rule
   if(M20 && C<M20 && R<45) { sig="SELL"; rs.unshift("Breakdown MA20"); }
 
   return { signal: sig, score: Math.max(0, Math.min(100, Math.round(sc))), reasons: rs, metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
@@ -554,15 +563,33 @@ function renderSignals(rows) {
 
 async function refreshSignals(){
   try {
+    // Priority: Uploaded File Date -> Latest DB Signal Date -> Latest DB Price Date
     let d = lastParsed.tradeDateISO; 
-    if (!d) d = await fetchLatestTradeDate();
+    
+    // If no uploaded file (init state), fetch latest available date from DB
+    if (!d) {
+      latestDbDate = await fetchLatestTradeDate();
+      d = latestDbDate;
+    }
+    
+    // Enable Analyze button if we have a valid date in DB
+    if (d) {
+       elBtnAnalyze.disabled = false;
+       latestDbDate = d;
+    }
+
     if(!d){ toast("Belum ada data."); return; }
     
     elPillDate.textContent = `Date: ${d}`;
     toast(`Memuat sinyal tanggal: ${d}...`);
+    
     cachedSignals = await fetchSignalsLatest(d);
-    if (cachedSignals.length > 0) toast(`Berhasil memuat ${cachedSignals.length} baris.`);
-    else toast(`Tidak ada sinyal untuk ${d}. Coba klik 'Analisis Swing'.`, true);
+    
+    if (cachedSignals.length > 0) {
+      toast(`Berhasil memuat ${cachedSignals.length} baris.`);
+    } else {
+      toast(`Data ada (${d}), tapi belum dianalisis. Klik 'Analisis Swing'.`, true);
+    }
     
     renderSignals(cachedSignals);
   } catch(e) { 
@@ -574,5 +601,5 @@ async function refreshSignals(){
 elSearch.oninput = () => renderSignals(cachedSignals);
 elFilterSignal.onchange = () => renderSignals(cachedSignals);
 
-toast("Siap. Pilih banyak file sekaligus.");
+toast("Siap. Klik 'Analisis Swing' untuk hitung ulang data DB.");
 refreshSignals();
