@@ -1,48 +1,43 @@
 /* =========================================================
-   Swing Signals — CSV → Supabase (NO LOGIN, NO WATCHLIST)
-   - Upload CSV ringkasan harian (format IDX)
-   - Simpan histori ke Supabase (prices_daily + symbols)
-   - Analisis swing rule-based (signals_daily)
+   Swing Signals — CSV → Supabase
+   - Batch Upload Support (CSV/XLSX)
+   - Auto Zip Download for converted XLSX
 ========================================================= */
 
 /* =========================
-   CONFIG (KEYS EMBEDDED)
+   CONFIG
 ========================= */
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaGZ3ZGJnb2VqZHV6anZlenJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NjMxNzEsImV4cCI6MjA4MjEzOTE3MX0.JUoaKbT29HMZUhGjUbT4yj9MF0sn4gjzUOs9mKLM-nw";
 
-if (!window.supabase) {
-  throw new Error("Supabase library belum ter-load. Cek script CDN supabase-js di index.html.");
-}
+if (!window.supabase) throw new Error("Supabase library not found.");
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* =========================
    UI Helpers
 ========================= */
 const $ = (id) => document.getElementById(id);
-
 const elFileInput = $("fileInput");
-const elBtnConvert = $("btnConvert"); // Tombol baru
+const elBtnConvert = $("btnConvert");
 const elBtnUpload = $("btnUpload");
 const elBtnAnalyze = $("btnAnalyze");
-
 const elPillStatus = $("pillStatus");
 const elPillDate = $("pillDate");
 const elPillRows = $("pillRows");
-
 const elSignals = $("signalsTable");
-
 const elSearch = $("search");
 const elFilterSignal = $("filterSignal");
 
 let lastParsed = { tradeDateISO: null, rows: [] };
 let cachedSignals = [];
 let cachedSignalsDate = null;
-let tempXlsxFile = null; // Simpan file XLSX sementara
+let tempXlsxFiles = []; // Array of files
 
-// Sorting (klik header kolom: DESC → ASC → off)
+/* =========================
+   Sorting & Utils
+========================= */
 let sortKey = "score";
-let sortDir = -1; // -1 desc, 1 asc, 0 off
+let sortDir = -1;
 
 const COLS = [
   { key: "symbol", label: "Symbol", type: "text" },
@@ -59,189 +54,94 @@ const COLS = [
 
 function sortBadgeFor(key){
   if (sortKey !== key) return "";
-  if (sortDir === 1) return "▲";
-  if (sortDir === -1) return "▼";
-  return "";
+  return sortDir === 1 ? "▲" : "▼";
 }
 function setSort(key){
   if (sortKey !== key){ sortKey = key; sortDir = -1; return; }
-  if (sortDir === -1) sortDir = 1;
-  else if (sortDir === 1) sortDir = 0;
-  else sortDir = -1;
+  sortDir = sortDir === -1 ? 1 : (sortDir === 1 ? 0 : -1);
 }
 function cmp(a, b, col){
-  const av = a[col.key];
-  const bv = b[col.key];
-
-  if (col.key === "reasons"){
-    const as = Array.isArray(av) ? av.join(" | ") : (av ?? "");
-    const bs = Array.isArray(bv) ? bv.join(" | ") : (bv ?? "");
-    return String(as).localeCompare(String(bs));
-  }
-
+  const av = a[col.key], bv = b[col.key];
+  if (col.key === "reasons") return String(av).localeCompare(String(bv));
   if (col.type === "num"){
-    const an = (av === null || av === undefined) ? null : Number(av);
-    const bn = (bv === null || bv === undefined) ? null : Number(bv);
-    if (an === null && bn === null) return 0;
-    if (an === null) return 1;
-    if (bn === null) return -1;
+    const an = Number(av || 0), bn = Number(bv || 0);
     return an - bn;
   }
-
   return String(av ?? "").localeCompare(String(bv ?? ""));
 }
 
-/* =========================
-   Utilities
-========================= */
 function toast(msg, bad=false){
   elPillStatus.textContent = `Status: ${msg}`;
   elPillStatus.style.borderColor = bad ? "rgba(255,120,80,.45)" : "rgba(255,255,255,.10)";
 }
-
-function fmt(x){
-  if (x === null || x === undefined) return "-";
-  if (typeof x === "number") return Number.isFinite(x) ? x.toLocaleString("id-ID") : "-";
-  return String(x);
-}
-function fmt2(x){
-  if (x === null || x === undefined) return "-";
-  const n = Number(x);
-  if (!Number.isFinite(n)) return "-";
-  return n.toFixed(2);
-}
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
-}
-
-function num(x) {
-  if (x === null || x === undefined || x === "") return null;
-  const n = Number(String(x).replace(/,/g, ""));
-  return Number.isFinite(n) ? n : null;
-}
-function int(x) {
-  const n = num(x);
-  return n === null ? null : Math.trunc(n);
-}
+function fmt(x){ return (typeof x === "number" && Number.isFinite(x)) ? x.toLocaleString("id-ID") : "-"; }
+function fmt2(x){ const n = Number(x); return Number.isFinite(n) ? n.toFixed(2) : "-"; }
+function escapeHtml(str){ return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+function num(x) { const n = Number(String(x || "").replace(/,/g, "")); return Number.isFinite(n) ? n : null; }
+function int(x) { return Math.trunc(num(x) || 0); }
 
 /* =========================
-   Date parse (e.g. "08 Des 2025")
+   Date Parsing
 ========================= */
 const MONTH_ID = {
-  jan: "01", januari: "01",
-  feb: "02", februari: "02",
-  mar: "03", maret: "03",
-  apr: "04", april: "04",
-  mei: "05",
-  jun: "06", juni: "06",
-  jul: "07", juli: "07",
-  agu: "08", agustus: "08",
-  agt: "08", // variasi singkatan
-
-  sep: "09", september: "09",
-  okt: "10", oktober: "10",
-  nov: "11", november: "11",
-  des: "12", desember: "12",
+  jan: "01", januari: "01", feb: "02", februari: "02", mar: "03", maret: "03",
+  apr: "04", april: "04", mei: "05", jun: "06", juni: "06", jul: "07", juli: "07",
+  agu: "08", agustus: "08", agt: "08", sep: "09", september: "09", okt: "10", oktober: "10",
+  nov: "11", november: "11", des: "12", desember: "12",
 };
-
 function parseIDXDateToISO(s) {
   if (!s) return null;
   const raw = String(s).trim().replace(/\s+/g, " ");
-  // Already ISO?
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-
   const parts = raw.split(" ");
   if (parts.length < 3) return null;
-
-  const d = String(parts[0]).padStart(2, "0");
-  const monKey = parts[1].toLowerCase();
-
-  // Normalisasi singkatan bulan yang sering beda sumber
-  // contoh: "Agt" -> "Agu"
-  const monNorm = (monKey === "agt") ? "agu" : monKey;
-  const y = parts[2];
-
-  const m = MONTH_ID[monNorm] || MONTH_ID[monNorm.slice(0,3)] || MONTH_ID[monKey] || MONTH_ID[monKey.slice(0,3)];
+  const d = parts[0].padStart(2, "0");
+  const m = MONTH_ID[parts[1].toLowerCase()] || MONTH_ID[parts[1].slice(0,3).toLowerCase()];
   if (!m) return null;
-
-  return `${y}-${m}-${d}`;
+  return `${parts[2]}-${m}-${d}`;
 }
 
 /* =========================
-   Robust CSV Parser (no external libs)
-   - Supports quoted fields, commas, CRLF/LF
+   CSV Parser & Logic
 ========================= */
 function parseCSV(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
+  const rows = [], len = text.length;
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < len; i++) {
     const c = text[i];
-
     if (inQuotes) {
       if (c === '"') {
-        // escaped quote?
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += c;
-      }
-      continue;
-    }
-
-    if (c === '"') {
-      inQuotes = true;
-    } else if (c === ',') {
-      row.push(field);
-      field = "";
-    } else if (c === '\n') {
-      row.push(field);
-      field = "";
-      // drop trailing \r from last field if any
-      if (row.length && typeof row[row.length - 1] === "string") {
-        row[row.length - 1] = row[row.length - 1].replace(/\r$/, "");
-      }
-      // skip empty lines
-      if (row.some(v => v !== "")) rows.push(row);
-      row = [];
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
     } else {
-      field += c;
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ""; }
+      else if (c === '\n') {
+        row.push(field.replace(/\r$/, "")); field = "";
+        if (row.some(v => v !== "")) rows.push(row);
+        row = [];
+      } else field += c;
     }
   }
-
-  // flush last field
-  if (field.length || row.length) {
-    row.push(field.replace(/\r$/, ""));
-    if (row.some(v => v !== "")) rows.push(row);
-  }
+  if (field || row.length) { row.push(field.replace(/\r$/, "")); if (row.some(v => v !== "")) rows.push(row); }
   return rows;
 }
 
-// Logic pemrosesan CSV dipisah agar bisa dipanggil dari upload biasa atau hasil konversi
-async function processCsvFile(file) {
-  try {
+// Function to process an array of file objects (CSV)
+async function processBatchCsvFiles(files) {
+  let allRows = [];
+  let foundDates = new Set();
+  
+  for (const file of files) {
     const text = await file.text();
     const grid = parseCSV(text);
-    if (!grid.length) throw new Error("CSV kosong atau format tidak terbaca.");
+    if (grid.length < 2) continue;
 
     const header = grid[0].map(h => String(h || "").trim());
-    const dataRows = grid.slice(1);
-
-    // build objects
-    const rawRows = dataRows.map(cols => {
+    const rawRows = grid.slice(1).map(cols => {
       const obj = {};
-      for (let i = 0; i < header.length; i++) obj[header[i]] = cols[i] ?? "";
+      header.forEach((h, i) => obj[h] = cols[i] ?? "");
       return obj;
     });
 
@@ -249,469 +149,170 @@ async function processCsvFile(file) {
       .filter(r => r["Kode Saham"])
       .map(r => {
         const tradeDateISO = parseIDXDateToISO(r["Tanggal Perdagangan Terakhir"]);
+        if (tradeDateISO) foundDates.add(tradeDateISO);
         return {
           trade_date: tradeDateISO,
           symbol: String(r["Kode Saham"]).trim(),
           name: r["Nama Perusahaan"] ? String(r["Nama Perusahaan"]).trim() : null,
-
           prev: num(r["Sebelumnya"]),
           open: num(r["Open Price"]),
           high: num(r["Tertinggi"]),
           low: num(r["Terendah"]),
           close: num(r["Penutupan"]),
-          chg: num(r["Selisih"]),
-
           volume: int(r["Volume"]),
-          value: num(r["Nilai"]),
-          freq: int(r["Frekuensi"]),
-
           foreign_buy: int(r["Foreign Buy"]),
           foreign_sell: int(r["Foreign Sell"]),
         };
       })
       .filter(r => r.trade_date);
-
-    const tradeDateISO = cleaned[0]?.trade_date || null;
     
-    lastParsed = { tradeDateISO, rows: cleaned };
-
-    // Update UI
-    elPillDate.textContent = `Trade date: ${tradeDateISO || "-"}`;
-    elPillRows.textContent = `Rows: ${cleaned.length.toLocaleString("id-ID")}`;
-    
-    elBtnUpload.disabled = cleaned.length === 0;
-    elBtnAnalyze.disabled = cleaned.length === 0;
-    
-    // Matikan tombol convert karena sudah jadi CSV
-    elBtnConvert.disabled = true;
-
-    return { tradeDateISO, rows: cleaned };
-  } catch(err) {
-    throw err;
+    allRows = allRows.concat(cleaned);
   }
+
+  // Determine "Latest Date" for analysis
+  const sortedDates = Array.from(foundDates).sort();
+  const latestDate = sortedDates[sortedDates.length - 1] || null;
+
+  lastParsed = { tradeDateISO: latestDate, rows: allRows };
+
+  // Update UI
+  const dateLabel = sortedDates.length > 1 ? `${sortedDates.length} Dates (Latest: ${latestDate})` : (latestDate || "-");
+  elPillDate.textContent = `Date: ${dateLabel}`;
+  elPillRows.textContent = `Total Rows: ${allRows.length.toLocaleString("id-ID")}`;
+  
+  elBtnUpload.disabled = allRows.length === 0;
+  elBtnAnalyze.disabled = allRows.length === 0;
+  
+  if(tempXlsxFiles.length === 0) elBtnConvert.disabled = true;
+
+  return allRows.length;
 }
 
 /* =========================
-   Supabase ops
-========================= */
-async function upsertSymbols(rows) {
-  const payload = rows.map(r => ({ symbol: r.symbol, name: r.name }));
-  const { error } = await sb.from("symbols").upsert(payload, { onConflict: "symbol" });
-  if (error) throw error;
-}
-
-async function upsertPrices(rows) {
-  const CHUNK = 500;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const part = rows.slice(i, i + CHUNK);
-    const { error } = await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" });
-    if (error) throw error;
-  }
-}
-
-async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays = 160) {
-  const unique = Array.from(new Set(symbols));
-  const SYM_CHUNK = 120;
-
-  const start = new Date(endDateISO);
-  start.setDate(start.getDate() - lookbackDays);
-  const startISO = start.toISOString().slice(0, 10);
-
-  let all = [];
-  for (let i = 0; i < unique.length; i += SYM_CHUNK) {
-    const slice = unique.slice(i, i + SYM_CHUNK);
-    const { data, error } = await sb
-      .from("prices_daily")
-      .select("trade_date,symbol,open,high,low,close,volume,foreign_net")
-      .in("symbol", slice)
-      .gte("trade_date", startISO)
-      .lte("trade_date", endDateISO)
-      .order("trade_date", { ascending: true });
-
-    if (error) throw error;
-    all = all.concat(data || []);
-  }
-  return all;
-}
-
-async function upsertSignals(signalRows) {
-  const CHUNK = 500;
-  for (let i = 0; i < signalRows.length; i += CHUNK) {
-    const part = signalRows.slice(i, i + CHUNK);
-    const { error } = await sb.from("signals_daily").upsert(part, { onConflict: "trade_date,symbol,strategy" });
-    if (error) throw error;
-  }
-}
-
-async function fetchSignalsLatest(tradeDateISO) {
-  const { data, error } = await sb
-    .from("signals_daily")
-    .select("trade_date,symbol,signal,score,reasons,close,rsi14,ma20,ma50,atr14,vol_ratio,foreign_net")
-    .eq("trade_date", tradeDateISO)
-    .eq("strategy", "SWING_V1")
-    .order("score", { ascending: false })
-    .limit(5000);
-  if (error) throw error;
-  return data || [];
-}
-
-async function fetchLatestTradeDate() {
-  const { data, error } = await sb
-    .from("prices_daily")
-    .select("trade_date")
-    .order("trade_date", { ascending: false })
-    .limit(1);
-  if (error) throw error;
-  return data?.[0]?.trade_date || null;
-}
-
-/* =========================
-   Indicators
-========================= */
-function SMA(values, period) {
-  const out = new Array(values.length).fill(null);
-  let sum = 0;
-  let q = [];
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    q.push(v);
-    sum += v;
-    if (q.length > period) sum -= q.shift();
-    if (q.length === period) out[i] = sum / period;
-  }
-  return out;
-}
-
-function RSI(values, period = 14) {
-  const out = new Array(values.length).fill(null);
-  let gain = 0, loss = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const ch = values[i] - values[i - 1];
-    if (!Number.isFinite(ch)) continue;
-    if (ch >= 0) gain += ch; else loss -= ch;
-  }
-  gain /= period; loss /= period;
-  out[period] = loss === 0 ? 100 : 100 - (100 / (1 + gain / loss));
-
-  for (let i = period + 1; i < values.length; i++) {
-    const ch = values[i] - values[i - 1];
-    const g = ch > 0 ? ch : 0;
-    const l = ch < 0 ? -ch : 0;
-    gain = (gain * (period - 1) + g) / period;
-    loss = (loss * (period - 1) + l) / period;
-    out[i] = loss === 0 ? 100 : 100 - (100 / (1 + gain / loss));
-  }
-  return out;
-}
-
-function ATR(high, low, close, period = 14) {
-  const tr = new Array(close.length).fill(null);
-  for (let i = 0; i < close.length; i++) {
-    if (i === 0) tr[i] = high[i] - low[i];
-    else {
-      const a = high[i] - low[i];
-      const b = Math.abs(high[i] - close[i - 1]);
-      const c = Math.abs(low[i] - close[i - 1]);
-      tr[i] = Math.max(a, b, c);
-    }
-  }
-  const atr = new Array(close.length).fill(null);
-  let first = 0;
-  for (let i = 0; i < period; i++) first += tr[i] ?? 0;
-  atr[period - 1] = first / period;
-  for (let i = period; i < close.length; i++) {
-    atr[i] = ((atr[i - 1] * (period - 1)) + tr[i]) / period;
-  }
-  return atr;
-}
-
-function rollingMax(values, period) {
-  const out = new Array(values.length).fill(null);
-  for (let i = 0; i < values.length; i++) {
-    if (i + 1 < period) continue;
-    let m = -Infinity;
-    for (let j = i - period + 1; j <= i; j++) m = Math.max(m, values[j]);
-    out[i] = m;
-  }
-  return out;
-}
-
-/* =========================
-   Swing scoring rules (SWING_V1)
-========================= */
-function scoreSwing(series) {
-  const closes = series.map(x => x.close ?? 0);
-  const highs = series.map(x => x.high ?? 0);
-  const lows  = series.map(x => x.low ?? 0);
-  const vols  = series.map(x => x.volume ?? 0);
-
-  const ma20 = SMA(closes, 20);
-  const ma50 = SMA(closes, 50);
-  const rsi14 = RSI(closes, 14);
-  const atr14 = ATR(highs, lows, closes, 14);
-  const volMA20 = SMA(vols, 20);
-  const hh20 = rollingMax(highs, 20);
-
-  const i = series.length - 1;
-  const last = series[i];
-  const prev = series[i - 1];
-
-  const reasons = [];
-  let score = 0;
-
-  const C = last.close, O = last.open;
-  const MA20 = ma20[i], MA50 = ma50[i];
-  const RSI14 = rsi14[i];
-  const ATR14 = atr14[i];
-  const V = last.volume ?? 0;
-  const VMA20 = volMA20[i] ?? null;
-  const VOLR = (VMA20 && VMA20 > 0) ? (V / VMA20) : null;
-  const FNET = last.foreign_net ?? 0;
-  const HH20 = hh20[i];
-
-  if (!MA50 || !RSI14 || !ATR14 || !HH20 || !VOLR) {
-    return {
-      signal: "WAIT",
-      score: 0,
-      reasons: ["Data belum cukup (butuh histori ≥ 50 hari)."],
-      metrics: { close: C, rsi14: RSI14, ma20: MA20, ma50: MA50, atr14: ATR14, vol_ratio: VOLR, foreign_net: FNET }
-    };
-  }
-
-  if (C > MA50) { score += 15; reasons.push("Close > MA50 (uptrend)."); }
-  if (MA20 > MA50) { score += 10; reasons.push("MA20 > MA50 (trend menguat)."); }
-
-  if (RSI14 >= 45 && RSI14 <= 70) { score += 15; reasons.push("RSI 45–70 (momentum sehat)."); }
-  if (RSI14 > 70) { score -= 8; reasons.push("RSI > 70 (jenuh beli)."); }
-  if (RSI14 < 40) { score -= 10; reasons.push("RSI < 40 (lemah)."); }
-
-  if (C >= HH20 * 0.995) { score += 20; reasons.push("Dekat/tembus high 20 hari (breakout)."); }
-
-  if (VOLR >= 1.3) { score += 15; reasons.push(`Volume kuat (${VOLR.toFixed(2)}x MA20).`); }
-  else if (VOLR < 0.8) { score -= 6; reasons.push(`Volume lemah (${VOLR.toFixed(2)}x MA20).`); }
-
-  if (FNET > 0) { score += 10; reasons.push("Foreign net buy (+)."); }
-  if (FNET < 0) { score -= 6; reasons.push("Foreign net sell (-)."); }
-
-  if (C > O) { score += 3; reasons.push("Candle hijau (close > open)."); }
-  if (prev && prev.close && C > prev.close) { score += 2; reasons.push("Close naik vs kemarin."); }
-
-  let signal = "WAIT";
-  if (score >= 65) signal = "BUY";
-  else if (score <= 30) signal = "SELL";
-
-  if (C < MA20 && RSI14 < 45) {
-    signal = "SELL";
-    reasons.unshift("Close < MA20 + RSI < 45 (breakdown).");
-  }
-
-  score = Math.max(0, Math.min(100, Math.round(score)));
-
-  return {
-    signal,
-    score,
-    reasons,
-    metrics: { close: C, rsi14: RSI14, ma20: MA20, ma50: MA50, atr14: ATR14, vol_ratio: VOLR, foreign_net: FNET }
-  };
-}
-
-/* =========================
-   Render
-========================= */
-function renderSignals(rows) {
-  const thead = elSignals.querySelector("thead");
-  const tbody = elSignals.querySelector("tbody");
-
-  thead.innerHTML =
-    "<tr>" +
-      COLS.map(c => `<th class="sortable" data-key="${c.key}">${c.label}<span class="sort">${sortBadgeFor(c.key)}</span></th>`).join("") +
-    "</tr>";
-
-  for (const th of thead.querySelectorAll("th.sortable")) {
-    th.onclick = () => { setSort(th.dataset.key); renderSignals(cachedSignals); };
-  }
-
-  const q = (elSearch.value || "").trim().toLowerCase();
-  const f = elFilterSignal.value;
-
-  let filtered = rows.filter(r => {
-    if (f !== "ALL" && r.signal !== f) return false;
-    if (q && !String(r.symbol).toLowerCase().includes(q)) return false;
-    return true;
-  });
-
-  const col = COLS.find(c => c.key === sortKey) || COLS[2];
-  if (sortDir !== 0) filtered = filtered.slice().sort((a,b) => cmp(a,b,col) * sortDir);
-  else filtered = filtered.slice().sort((a,b) => (Number(b.score||0) - Number(a.score||0)));
-
-  const body = filtered.map(r => {
-    const badgeClass = r.signal === "BUY" ? "buy" : r.signal === "SELL" ? "sell" : "wait";
-    const reasonsShort = Array.isArray(r.reasons) ? r.reasons.slice(0,3).join(" • ") : "";
-    const reasonsTitle = Array.isArray(r.reasons) ? r.reasons.join(" | ") : "";
-    return `
-      <tr>
-        <td class="mono">${escapeHtml(r.symbol)}</td>
-        <td><span class="badge ${badgeClass}">${escapeHtml(r.signal)}</span></td>
-        <td class="mono">${fmt(r.score)}</td>
-        <td class="mono">${fmt(r.close)}</td>
-        <td class="mono">${fmt2(r.rsi14)}</td>
-        <td class="mono">${fmt2(r.ma20)}</td>
-        <td class="mono">${fmt2(r.ma50)}</td>
-        <td class="mono">${fmt2(r.vol_ratio)}</td>
-        <td class="mono">${fmt(r.foreign_net)}</td>
-        <td title="${escapeHtml(reasonsTitle)}">${escapeHtml(reasonsShort)}</td>
-      </tr>
-    `;
-  }).join("");
-
-  tbody.innerHTML =
-    body || "<tr><td colspan='10' class='dim'>Belum ada sinyal. Klik Analisis.</td></tr>";
-}
-
-/* =========================
-   Refresh signals
-========================= */
-async function loadSignalsForDate(dateISO){
-  if(!dateISO) return [];
-  if(cachedSignalsDate===dateISO && cachedSignals.length) return cachedSignals;
-  const signals = await fetchSignalsLatest(dateISO);
-  cachedSignals = signals;
-  cachedSignalsDate = dateISO;
-  return signals;
-}
-
-async function refreshSignals(){
-  try{
-    let dateISO = lastParsed.tradeDateISO || await fetchLatestTradeDate();
-    if(!dateISO){ toast("belum ada data di Supabase."); return; }
-    elPillDate.textContent = `Trade date: ${dateISO}`;
-    const signals = await loadSignalsForDate(dateISO);
-    renderSignals(signals);
-  }catch(err){
-    console.error(err);
-    toast(`refresh gagal: ${err.message || err}`, true);
-  }
-}
-
-/* =========================
-   UI events (MODIFIED FOR XLSX)
+   Event Handlers (Batch Logic)
 ========================= */
 elFileInput.onchange = async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) {
-    elBtnConvert.disabled = true;
-    elBtnUpload.disabled = true;
-    return;
-  }
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
 
-  // Deteksi Format XLSX
-  if (file.name.toLowerCase().endsWith(".xlsx")) {
-    tempXlsxFile = file;
-    elBtnConvert.disabled = false;
-    elBtnUpload.disabled = true;
-    elBtnAnalyze.disabled = true;
-    toast("File XLSX terdeteksi. Klik 'Convert XLSX'.");
-    return;
-  }
+  // Filter XLSX
+  tempXlsxFiles = files.filter(f => f.name.toLowerCase().endsWith(".xlsx"));
+  const csvFiles = files.filter(f => f.name.toLowerCase().endsWith(".csv"));
 
-  // Jika CSV, proses langsung
-  try {
-    tempXlsxFile = null;
-    elBtnConvert.disabled = true;
-    toast("membaca csv…");
-    await processCsvFile(file);
-    toast("file siap di-upload.");
-  } catch(err) {
-    console.error(err);
-    toast(`gagal baca csv: ${err.message || err}`, true);
+  // Reset UI
+  elBtnConvert.disabled = tempXlsxFiles.length === 0;
+  elBtnUpload.disabled = true;
+  elBtnAnalyze.disabled = true;
+  elPillStatus.textContent = "Status: Memeriksa file...";
+
+  if (tempXlsxFiles.length > 0) {
+    toast(`Terdeteksi: ${tempXlsxFiles.length} XLSX, ${csvFiles.length} CSV. Klik 'Convert' untuk memproses.`);
+    // If user mixed files, we disable direct upload until converted
+  } else {
+    // Only CSVs
+    try {
+      toast(`Membaca ${csvFiles.length} file CSV...`);
+      const count = await processBatchCsvFiles(csvFiles);
+      toast(`Siap upload (${count} baris data).`);
+    } catch(err) {
+      console.error(err);
+      toast("Gagal baca CSV: " + err.message, true);
+    }
   }
 };
 
 elBtnConvert.onclick = async () => {
-  if (!tempXlsxFile) return;
+  if (!tempXlsxFiles.length) return;
+  
   try {
-    toast("Mengonversi XLSX ke CSV…");
+    toast(`Sedang konversi ${tempXlsxFiles.length} file XLSX...`);
+    const zip = new JSZip();
+    const convertedCsvBlobs = [];
+
+    // Loop convert
+    for (const file of tempXlsxFiles) {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const csvOutput = XLSX.utils.sheet_to_csv(firstSheet);
+      
+      const csvName = file.name.replace(/\.xlsx$/i, ".csv");
+      
+      // Add to ZIP
+      zip.file(csvName, csvOutput);
+      
+      // Add to memory for app usage
+      convertedCsvBlobs.push(new File([csvOutput], csvName, { type: "text/csv" }));
+    }
+
+    // Generate ZIP
+    toast("Membuat file ZIP...");
+    const zipContent = await zip.generateAsync({ type: "blob" });
     
-    // Baca buffer file
-    const data = await tempXlsxFile.arrayBuffer();
-    // Parse menggunakan SheetJS
-    const workbook = XLSX.read(data);
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    // Convert ke CSV string
-    const csvOutput = XLSX.utils.sheet_to_csv(firstSheet);
-    
-    // 1. Download File CSV (Sesuai request)
-    const blob = new Blob([csvOutput], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
+    // Download ZIP
+    const url = URL.createObjectURL(zipContent);
     const a = document.createElement("a");
     a.href = url;
-    a.download = tempXlsxFile.name.replace(/\.xlsx$/i, ".csv");
+    a.download = `Converted_Stocks_${new Date().toISOString().slice(0,10)}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
 
-    // 2. Load ke Aplikasi (Auto-load)
-    // Bungkus blob jadi File object agar kompatibel dengan logika lama
-    const newFile = new File([blob], a.download, { type: "text/csv" });
-    await processCsvFile(newFile);
+    // Auto-load to App
+    toast("Memuat data hasil konversi...");
+    await processBatchCsvFiles(convertedCsvBlobs);
     
-    toast("Konversi sukses & data siap upload.");
-    tempXlsxFile = null; // reset
-  } catch(err) {
+    toast("Konversi selesai & Data siap upload!");
+    tempXlsxFiles = []; 
+    elBtnConvert.disabled = true;
+
+  } catch (err) {
     console.error(err);
-    toast("Gagal konversi XLSX: " + err.message, true);
+    toast("Gagal konversi batch: " + err.message, true);
   }
 };
 
 elBtnUpload.onclick = async () => {
-  try{
-    const { tradeDateISO, rows } = lastParsed;
-    if (!tradeDateISO || !rows.length) return;
+  try {
+    const { rows } = lastParsed;
+    if (!rows.length) return;
 
-    toast("upsert symbols…");
+    toast("Mengirim data ke Supabase...");
     await upsertSymbols(rows);
-
-    toast("upload prices_daily…");
     await upsertPrices(rows);
 
-    cachedSignals = [];
-    cachedSignalsDate = null;
-    toast(`upload sukses (${rows.length} baris) • ${tradeDateISO}`);
+    cachedSignals = []; 
+    toast(`Upload sukses (${rows.length} baris).`);
     await refreshSignals();
-  }catch(err){
+  } catch(err) {
     console.error(err);
-    toast(`upload gagal: ${err.message || err}`, true);
+    toast("Upload gagal: " + err.message, true);
   }
 };
 
 elBtnAnalyze.onclick = async () => {
-  try{
+  try {
     const { tradeDateISO, rows } = lastParsed;
-    if (!tradeDateISO || !rows.length) return;
+    if (!tradeDateISO) return;
+    
+    // Ambil unique symbols dari data yg diupload
+    const symbols = [...new Set(rows.map(r => r.symbol))];
+    
+    toast(`Analisis per tanggal: ${tradeDateISO} (Lookback 160 hari)`);
+    const history = await fetchHistoryForSymbols(symbols, tradeDateISO, 160);
 
-    toast("ambil histori (lookback 160 hari)…");
-    const history = await fetchHistoryForSymbols(rows.map(r => r.symbol), tradeDateISO, 160);
-
-    toast("hitung sinyal swing…");
+    // Group history by symbol
     const bySym = new Map();
-    for (const r of history) {
+    history.forEach(r => {
       if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
-      bySym.get(r.symbol).push({
-        trade_date: r.trade_date,
-        symbol: r.symbol,
-        open: r.open,
-        high: r.high,
-        low: r.low,
-        close: r.close,
-        volume: r.volume,
-        foreign_net: r.foreign_net,
-      });
-    }
+      bySym.get(r.symbol).push(r);
+    });
 
     const out = [];
     for (const [sym, series] of bySym.entries()) {
+      // Ensure sorted
       series.sort((a,b) => a.trade_date.localeCompare(b.trade_date));
+      // Must include target date
       if (series[series.length - 1]?.trade_date !== tradeDateISO) continue;
 
       const res = scoreSwing(series);
@@ -722,34 +323,205 @@ elBtnAnalyze.onclick = async () => {
         signal: res.signal,
         score: res.score,
         reasons: res.reasons,
-
-        close: res.metrics.close ?? null,
-        rsi14: res.metrics.rsi14 ?? null,
-        ma20: res.metrics.ma20 ?? null,
-        ma50: res.metrics.ma50 ?? null,
-        atr14: res.metrics.atr14 ?? null,
-        vol_ratio: res.metrics.vol_ratio ?? null,
-        foreign_net: res.metrics.foreign_net ?? null,
+        close: res.metrics.close, rsi14: res.metrics.rsi14, 
+        ma20: res.metrics.ma20, ma50: res.metrics.ma50,
+        atr14: res.metrics.atr14, vol_ratio: res.metrics.vol_ratio,
+        foreign_net: res.metrics.foreign_net
       });
     }
 
-    toast("simpan signals_daily…");
+    toast(`Menyimpan ${out.length} sinyal...`);
     await upsertSignals(out);
-
+    
     cachedSignals = [];
-    cachedSignalsDate = null;
-    toast(`analisis selesai: ${out.length} simbol`);
+    toast("Analisis selesai.");
     await refreshSignals();
-  }catch(err){
+  } catch(err) {
     console.error(err);
-    toast(`analisis gagal: ${err.message || err}`, true);
+    toast("Analisis gagal: " + err.message, true);
   }
 };
+
+/* =========================
+   Supabase Ops (Standard)
+========================= */
+async function upsertSymbols(rows) {
+  // Use map to unique
+  const unique = new Map();
+  rows.forEach(r => unique.set(r.symbol, { symbol: r.symbol, name: r.name }));
+  const { error } = await sb.from("symbols").upsert([...unique.values()], { onConflict: "symbol" });
+  if (error) throw error;
+}
+
+async function upsertPrices(rows) {
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const part = rows.slice(i, i + CHUNK).map(r => ({
+      trade_date: r.trade_date, symbol: r.symbol,
+      open: r.open, high: r.high, low: r.low, close: r.close,
+      volume: r.volume, foreign_net: (r.foreign_buy || 0) - (r.foreign_sell || 0)
+    }));
+    const { error } = await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" });
+    if (error) throw error;
+  }
+}
+
+async function upsertSignals(signalRows) {
+  const CHUNK = 500;
+  for (let i = 0; i < signalRows.length; i += CHUNK) {
+    const { error } = await sb.from("signals_daily").upsert(signalRows.slice(i, i + CHUNK), { onConflict: "trade_date,symbol,strategy" });
+    if (error) throw error;
+  }
+}
+
+async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
+  const start = new Date(endDateISO);
+  start.setDate(start.getDate() - lookbackDays);
+  const startISO = start.toISOString().slice(0, 10);
+  
+  let all = [];
+  const CHUNK = 100; // split symbols
+  for(let i=0; i<symbols.length; i+=CHUNK){
+    const { data, error } = await sb.from("prices_daily")
+      .select("trade_date,symbol,open,high,low,close,volume,foreign_net")
+      .in("symbol", symbols.slice(i, i+CHUNK))
+      .gte("trade_date", startISO).lte("trade_date", endDateISO)
+      .order("trade_date", {ascending: true});
+    if(error) throw error;
+    if(data) all = all.concat(data);
+  }
+  return all;
+}
+
+async function fetchSignalsLatest(dateISO) {
+  const { data, error } = await sb.from("signals_daily")
+    .select("symbol,signal,score,reasons,close,rsi14,ma20,ma50,vol_ratio,foreign_net")
+    .eq("trade_date", dateISO).eq("strategy", "SWING_V1")
+    .order("score", { ascending: false }).limit(2000);
+  if (error) throw error;
+  return data || [];
+}
+
+async function fetchLatestTradeDate() {
+  const { data } = await sb.from("prices_daily").select("trade_date").order("trade_date", {ascending:false}).limit(1);
+  return data?.[0]?.trade_date;
+}
+
+/* =========================
+   Indicators & Scoring
+========================= */
+function SMA(v, p) {
+  const out = new Array(v.length).fill(null);
+  let sum=0;
+  for(let i=0;i<v.length;i++){
+    sum+=v[i];
+    if(i>=p) sum-=v[i-p];
+    if(i>=p-1) out[i]=sum/p;
+  }
+  return out;
+}
+function rollingMax(v, p) {
+  const out = new Array(v.length).fill(null);
+  for(let i=0;i<v.length;i++){
+    if(i<p-1) continue;
+    let m=-Infinity;
+    for(let j=i-p+1;j<=i;j++) m=Math.max(m, v[j]);
+    out[i]=m;
+  }
+  return out;
+}
+// Simplified RSI & ATR for brevity (Logic same as before)
+function RSI(vals, p=14){
+  const out=new Array(vals.length).fill(null);
+  let g=0, l=0;
+  for(let i=1;i<=p;i++){ const d=vals[i]-vals[i-1]; if(d>0)g+=d; else l-=d; }
+  g/=p; l/=p; out[p] = l===0?100:100-(100/(1+g/l));
+  for(let i=p+1;i<vals.length;i++){
+    const d=vals[i]-vals[i-1];
+    g=(g*(p-1)+(d>0?d:0))/p; l=(l*(p-1)+(d<0?-d:0))/p;
+    out[i]=l===0?100:100-(100/(1+g/l));
+  }
+  return out;
+}
+function ATR(h,l,c,p=14){
+  const tr=h.map((val,i)=>i===0?val-l[i]:Math.max(val-l[i], Math.abs(val-c[i-1]), Math.abs(l[i]-c[i-1])));
+  const out=new Array(c.length).fill(null);
+  let s=0; for(let i=0;i<p;i++)s+=tr[i]; out[p-1]=s/p;
+  for(let i=p;i<c.length;i++) out[i]=(out[i-1]*(p-1)+tr[i])/p;
+  return out;
+}
+
+function scoreSwing(series) {
+  const i = series.length - 1;
+  const last = series[i], prev = series[i-1];
+  const C = last.close, V = last.volume || 0, FNET = last.foreign_net || 0;
+  
+  const ma20 = SMA(series.map(x=>x.close), 20);
+  const ma50 = SMA(series.map(x=>x.close), 50);
+  const rsi = RSI(series.map(x=>x.close), 14);
+  const atr = ATR(series.map(x=>x.high), series.map(x=>x.low), series.map(x=>x.close), 14);
+  const vma = SMA(series.map(x=>x.volume||0), 20);
+  const hh20 = rollingMax(series.map(x=>x.high), 20);
+
+  const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i];
+  const VR = (VM && VM>0) ? V/VM : 0;
+  
+  if(!M50 || !R || !A) return { signal: "WAIT", score: 0, reasons: ["Data kurang"], metrics: {} };
+
+  let sc = 0, rs = [];
+  if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
+  if(M20>M50) { sc+=10; rs.push("MA20>MA50"); }
+  if(R>=45 && R<=70) { sc+=15; rs.push("RSI Sehat"); }
+  else if(R>70) { sc-=8; rs.push("RSI Overbought"); }
+  if(C >= H20*0.995) { sc+=20; rs.push("Near Breakout"); }
+  if(VR >= 1.3) { sc+=15; rs.push(`Vol Kuat (${VR.toFixed(1)}x)`); }
+  if(FNET > 0) { sc+=10; rs.push("Net Buy Asing"); }
+  
+  let sig = "WAIT";
+  if(sc>=65) sig="BUY"; else if(sc<=30) sig="SELL";
+  if(C<M20 && R<45) { sig="SELL"; rs.unshift("Breakdown MA20"); }
+
+  return { signal: sig, score: Math.max(0, Math.min(100, sc)), reasons: rs, metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
+}
+
+/* =========================
+   Render & Init
+========================= */
+function renderSignals(rows) {
+  const thead = elSignals.querySelector("thead");
+  thead.innerHTML = "<tr>" + COLS.map(c => `<th class="sortable" onclick="setSort('${c.key}');renderSignals(cachedSignals)">${c.label} ${sortBadgeFor(c.key)}</th>`).join("") + "</tr>";
+  
+  let d = rows.filter(r => (elFilterSignal.value==="ALL" || r.signal===elFilterSignal.value) && (!elSearch.value || r.symbol.toLowerCase().includes(elSearch.value.toLowerCase())));
+  const col = COLS.find(c=>c.key===sortKey) || COLS[2];
+  if(sortDir!==0) d.sort((a,b)=>cmp(a,b,col)*sortDir);
+
+  elSignals.querySelector("tbody").innerHTML = d.map(r => `
+    <tr>
+      <td class="mono">${escapeHtml(r.symbol)}</td>
+      <td><span class="badge ${r.signal.toLowerCase()}">${r.signal}</span></td>
+      <td class="mono">${fmt(r.score)}</td>
+      <td class="mono">${fmt(r.close)}</td>
+      <td class="mono">${fmt2(r.rsi14)}</td>
+      <td class="mono">${fmt2(r.ma20)}</td>
+      <td class="mono">${fmt2(r.ma50)}</td>
+      <td class="mono">${fmt2(r.vol_ratio)}</td>
+      <td class="mono">${fmt(r.foreign_net)}</td>
+      <td>${escapeHtml(r.reasons.join(", "))}</td>
+    </tr>`).join("") || "<tr><td colspan='10' class='dim'>No data</td></tr>";
+}
+
+async function refreshSignals(){
+  try {
+    const d = lastParsed.tradeDateISO || await fetchLatestTradeDate();
+    if(!d){ toast("Belum ada data."); return; }
+    elPillDate.textContent = `Date: ${d}`;
+    cachedSignals = await fetchSignalsLatest(d);
+    renderSignals(cachedSignals);
+  } catch(e) { console.error(e); }
+}
+
 elSearch.oninput = () => renderSignals(cachedSignals);
 elFilterSignal.onchange = () => renderSignals(cachedSignals);
 
-/* =========================
-   Init
-========================= */
-toast("siap. pilih file .csv/.xlsx untuk mulai.");
+toast("Siap. Pilih banyak file sekaligus.");
 refreshSignals();
