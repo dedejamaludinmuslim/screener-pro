@@ -101,9 +101,11 @@ input[type=range] { accent-color: var(--accent); width: 120px; }
 }
 .table tbody tr:hover td { background: var(--card); color: #fff; }
 
-/* Sticky Columns Logic */
-.table th:nth-child(1), .table td:nth-child(1) { position: sticky; left: 0; z-index: 15; background: var(--bg); width: 40px; text-align: center; border-right: 1px solid var(--border); } /* Star */
-.table th:nth-child(2), .table td:nth-child(2) { position: sticky; left: 40px; z-index: 15; background: var(--bg); width: 80px; border-right: 1px solid var(--border); } /* Symbol */
+/* Update bagian Sticky Columns Logic */
+/* Kolom 1 (Star) */
+.table th:nth-child(1), .table td:nth-child(1) { position: sticky; left: 0; z-index: 15; background: var(--bg); width: 40px; text-align: center; border-right: 1px solid var(--border); } 
+/* Kolom 2 (Symbol) - LEBAR DITAMBAH DIKIT AGAR IKON MASJID MUAT */
+.table th:nth-child(2), .table td:nth-child(2) { position: sticky; left: 40px; z-index: 15; background: var(--bg); width: 100px; border-right: 1px solid var(--border); }
 .table thead th:nth-child(1), .table thead th:nth-child(2) { z-index: 25; } /* Header sticky > Body sticky */
 .table tbody tr:hover td:nth-child(1),
 .table tbody tr:hover td:nth-child(2) { background: var(--card); }
