@@ -2,8 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Swing Signals Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" /> <title>Swing Signals Pro</title>
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -50,35 +49,39 @@
 
     <main class="main">
       <header class="toolbar">
-        <div class="tool-left">
+        
+        <div class="tool-section start">
           <div class="input-wrap">
             <span class="icon">🔍</span>
             <input id="search" placeholder="Cari emiten..." />
           </div>
-          
+        </div>
+
+        <div class="tool-section center">
           <div class="filter-group">
-            <label>Filter:</label> <select id="filterSignal">
-              <option value="ALL">Signal: All</option>
-              <option value="BUY">Signal: BUY</option>
-              <option value="SELL">Signal: SELL</option>
-              <option value="WAIT">Signal: WAIT</option>
+            <select id="filterSignal">
+              <option value="ALL">Sinyal: Semua</option>
+              <option value="BUY">Sinyal: BUY</option>
+              <option value="SELL">Sinyal: SELL</option>
+              <option value="WAIT">Sinyal: WAIT</option>
               <option value="WATCHLIST">★ Watchlist</option>
             </select>
-          
+            
             <select id="filterCategory">
-              <option value="ALL">Type: All</option>
-              <option value="SHARIA">🕌 Syariah (ISSI/JII)</option>
+              <option value="ALL">Tipe: Semua</option>
+              <option value="SHARIA">🕌 Syariah</option>
               <option value="NON">🏢 Non-Syariah</option>
             </select>
           </div>
         </div>
 
-        <div class="tool-right">
+        <div class="tool-section end">
           <div class="slider-group">
-            <label>Min Score: <span id="scoreVal" class="mono">0</span></label>
+            <label>Min Score: <span id="scoreVal" class="mono highlight">0</span></label>
             <input type="range" id="scoreSlider" min="0" max="95" value="0" step="5">
           </div>
         </div>
+
       </header>
 
       <div class="table-container">
