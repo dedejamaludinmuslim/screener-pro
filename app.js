@@ -2,6 +2,7 @@
    Swing Signals Pro
    - Security: Simple User Table Login
    - Restricted Access (Locked Columns, Hidden Buttons)
+   - Fix: Slider Max 30 & Disable Filter for Public
 ========================================================= */
 
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
@@ -50,23 +51,30 @@ function checkAuth() {
 
 function updateUIState() {
   if (isLoggedIn) {
-    // ADMIN VIEW
+    // --- ADMIN MODE ---
     elAdminControls.style.display = "flex";
     elBtnLogin.style.display = "none";
     elBtnLogout.style.display = "block";
-    elScoreSlider.max = "95"; // Full range
+    
+    // Unlock Features
+    elScoreSlider.max = "95"; 
+    elFilterSignal.disabled = false; // Enable Filter
   } else {
-    // PUBLIC VIEW
+    // --- PUBLIC MODE ---
     elAdminControls.style.display = "none";
     elBtnLogin.style.display = "block";
     elBtnLogout.style.display = "none";
     
-    // Slider Limit 50%
-    elScoreSlider.max = "50"; 
-    if (parseInt(elScoreSlider.value) > 50) {
+    // Restrict Slider (Max 30)
+    elScoreSlider.max = "30"; 
+    if (parseInt(elScoreSlider.value) > 30) {
       elScoreSlider.value = 0;
       elScoreVal.textContent = "0";
     }
+
+    // Disable Signal Filter (Prevent peeking)
+    elFilterSignal.value = "ALL"; // Reset first
+    elFilterSignal.disabled = true; // Lock
   }
   // Re-render table to show/hide locks
   renderSignals(cachedSignals);
@@ -87,12 +95,11 @@ $("btnSubmitLogin").onclick = async () => {
   const p = $("password").value;
   
   toast("Sedang login...");
-  // Simple check to 'users' table
   const { data, error } = await sb
     .from("users")
     .select("*")
     .eq("username", u)
-    .eq("password", p) // Note: In production, hash passwords!
+    .eq("password", p)
     .single();
 
   if (data) {
@@ -146,7 +153,6 @@ function setSort(key){
     toast("Login untuk mengurutkan kolom ini.", true);
     return;
   }
-
   if (sortKey !== key){ sortKey = key; sortDir = -1; return; } 
   sortDir = sortDir === -1 ? 1 : (sortDir === 1 ? 0 : -1); 
 }
@@ -273,7 +279,12 @@ function renderSignals(rows) {
 
   let d = rows.filter(r => {
     if (searchTerm && !r.symbol.toLowerCase().includes(searchTerm)) return false;
-    if (filterSig === "WATCHLIST") { if (!watchlist[r.symbol]) return false; } else if (filterSig !== "ALL" && r.signal !== filterSig) return false;
+    
+    // SECURITY: If filtering by Signal but NOT logged in -> Block rows that don't match, 
+    // BUT since dropdown is disabled, filterSig should be "ALL" usually.
+    if (filterSig === "WATCHLIST") { if (!watchlist[r.symbol]) return false; } 
+    else if (filterSig !== "ALL" && r.signal !== filterSig) return false;
+    
     const meta = symbolMeta[r.symbol] || { is_sharia: false };
     if (filterCat === "SHARIA" && !meta.is_sharia) return false;
     if (filterCat === "NON" && meta.is_sharia) return false;
@@ -292,10 +303,9 @@ function renderSignals(rows) {
     const meta = symbolMeta[r.symbol] || { sector: "-", is_sharia: false };
     const shariaBadge = meta.is_sharia ? '<span title="Syariah" style="cursor:help; font-size:10px">🕌</span>' : '';
 
-    // SECURITY: LOCK CONTENT
-    const lockIcon = `<span class="locked-cell"><span class="locked-icon">🔒</span> Premium</span>`;
+    // SECURITY: LOCK CONTENT - JUST ICON
+    const lockIcon = `<span class="locked-cell" style="justify-content:center"><span class="locked-icon" style="font-size:16px; opacity:0.7">🔒</span></span>`;
     
-    // Display Logic
     const displayScore = isLoggedIn ? (
         `<span class="${r.score >= 80 ? 'highlight' : ''}">${fmt(r.score)}</span>`
     ) : lockIcon;
@@ -306,7 +316,7 @@ function renderSignals(rows) {
 
     const displayReasons = isLoggedIn ? (
         `<span title="${escapeHtml(reasonsStr)}">${escapeHtml(reasonsStr)}</span>`
-    ) : `<span class="locked-cell"><span class="locked-icon">🔒</span> Login to view details</span>`;
+    ) : lockIcon;
 
     return `
     <tr>
@@ -325,18 +335,17 @@ function renderSignals(rows) {
 
       <td style="font-size:12px; color:#ccc">${escapeHtml(meta.sector)}</td>
       
-      <td class="mono">${displayScore}</td>
-      <td>${displaySignal}</td>
-      <td>${displayReasons}</td>
+      <td class="mono" style="text-align:center">${displayScore}</td>
+      <td style="text-align:center">${displaySignal}</td>
+      <td style="text-align:center">${displayReasons}</td>
     </tr>`;
   }).join("") || "<tr><td colspan='12' class='dim' style='text-align:center; padding:20px'>Data kosong / Tidak sesuai filter</td></tr>";
 }
 
 /* --- Shared Logic --- */
 elScoreSlider.oninput = (e) => { 
-  // Security enforce on slider drag
-  if (!isLoggedIn && e.target.value > 50) {
-    e.target.value = 50; // clamp
+  if (!isLoggedIn && e.target.value > 30) {
+    e.target.value = 30; // Enforce max 30 for public
   }
   elScoreVal.textContent = e.target.value; 
   renderSignals(cachedSignals); 
@@ -375,9 +384,7 @@ function scoreSwing(series) {
 
 async function refreshSignals(){
   try {
-    // Check auth on refresh
     checkAuth();
-
     await loadMetadata();
     let d = lastParsed.tradeDateISO; 
     if (!d) { latestDbDate = await fetchLatestTradeDate(); d = latestDbDate; }
