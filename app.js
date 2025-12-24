@@ -2,8 +2,8 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
-   - FIX: Supports Generated Column (foreign_net)
-   - FIX: Maps all columns (name, prev, chg, value, freq)
+   - FIX: Manual Calculation for Net Foreign in Signals
+   - FIX: Explicit Metric Mapping
 ========================================================= */
 
 /* =========================
@@ -130,7 +130,6 @@ function parseCSV(text) {
   return rows;
 }
 
-// Function to process an array of file objects (CSV)
 async function processBatchCsvFiles(files) {
   let allRows = [];
   let foundDates = new Set();
@@ -174,37 +173,32 @@ async function processBatchCsvFiles(files) {
     allRows = allRows.concat(cleaned);
   }
 
-  // Determine "Latest Date" for analysis
   const sortedDates = Array.from(foundDates).sort();
   const latestDate = sortedDates[sortedDates.length - 1] || null;
 
   lastParsed = { tradeDateISO: latestDate, rows: allRows };
 
-  // Update UI
   const dateLabel = sortedDates.length > 1 ? `${sortedDates.length} Dates (Latest: ${latestDate})` : (latestDate || "-");
   elPillDate.textContent = `Date: ${dateLabel}`;
   elPillRows.textContent = `Total Rows: ${allRows.length.toLocaleString("id-ID")}`;
   
   elBtnUpload.disabled = allRows.length === 0;
   elBtnAnalyze.disabled = allRows.length === 0;
-  
   if(tempXlsxFiles.length === 0) elBtnConvert.disabled = true;
 
   return allRows.length;
 }
 
 /* =========================
-   Event Handlers (Batch Logic)
+   Event Handlers
 ========================= */
 elFileInput.onchange = async (e) => {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
 
-  // Filter XLSX
   tempXlsxFiles = files.filter(f => f.name.toLowerCase().endsWith(".xlsx"));
   const csvFiles = files.filter(f => f.name.toLowerCase().endsWith(".csv"));
 
-  // Reset UI
   elBtnConvert.disabled = tempXlsxFiles.length === 0;
   elBtnUpload.disabled = true;
   elBtnAnalyze.disabled = true;
@@ -226,33 +220,20 @@ elFileInput.onchange = async (e) => {
 
 elBtnConvert.onclick = async () => {
   if (!tempXlsxFiles.length) return;
-  
   try {
     toast(`Sedang konversi ${tempXlsxFiles.length} file XLSX...`);
     const zip = new JSZip();
     const convertedCsvBlobs = [];
-
-    // Loop convert
     for (const file of tempXlsxFiles) {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data);
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
       const csvOutput = XLSX.utils.sheet_to_csv(firstSheet);
-      
       const csvName = file.name.replace(/\.xlsx$/i, ".csv");
-      
-      // Add to ZIP
       zip.file(csvName, csvOutput);
-      
-      // Add to memory for app usage
       convertedCsvBlobs.push(new File([csvOutput], csvName, { type: "text/csv" }));
     }
-
-    // Generate ZIP
-    toast("Membuat file ZIP...");
     const zipContent = await zip.generateAsync({ type: "blob" });
-    
-    // Download ZIP
     const url = URL.createObjectURL(zipContent);
     const a = document.createElement("a");
     a.href = url;
@@ -261,14 +242,11 @@ elBtnConvert.onclick = async () => {
     a.click();
     document.body.removeChild(a);
 
-    // Auto-load to App
     toast("Memuat data hasil konversi...");
     await processBatchCsvFiles(convertedCsvBlobs);
-    
     toast("Konversi selesai & Data siap upload!");
     tempXlsxFiles = []; 
     elBtnConvert.disabled = true;
-
   } catch (err) {
     console.error(err);
     toast("Gagal konversi batch: " + err.message, true);
@@ -298,27 +276,31 @@ elBtnAnalyze.onclick = async () => {
     const { tradeDateISO, rows } = lastParsed;
     if (!tradeDateISO) return;
     
-    // Ambil unique symbols dari data yg diupload
+    // Optimasi: Ambil symbols dari data terakhir saja untuk hemat
     const symbols = [...new Set(rows.map(r => r.symbol))];
     
     toast(`Analisis per tanggal: ${tradeDateISO} (Lookback 160 hari)`);
+    // FIX: Fetch foreign_buy & sell explicitly to manually calc net
     const history = await fetchHistoryForSymbols(symbols, tradeDateISO, 160);
 
-    // Group history by symbol
     const bySym = new Map();
     history.forEach(r => {
       if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
-      bySym.get(r.symbol).push(r);
+      // FIX: Calculate Foreign Net in JS to avoid DB Generated Column issues during read
+      const fNet = (Number(r.foreign_buy) || 0) - (Number(r.foreign_sell) || 0);
+      bySym.get(r.symbol).push({ ...r, foreign_net: fNet });
     });
 
     const out = [];
     for (const [sym, series] of bySym.entries()) {
-      // Ensure sorted
       series.sort((a,b) => a.trade_date.localeCompare(b.trade_date));
-      // Must include target date
       if (series[series.length - 1]?.trade_date !== tradeDateISO) continue;
 
       const res = scoreSwing(series);
+      
+      // FIX: Check if metric is invalid, convert to null explicitly
+      const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val;
+
       out.push({
         trade_date: tradeDateISO,
         symbol: sym,
@@ -326,10 +308,15 @@ elBtnAnalyze.onclick = async () => {
         signal: res.signal,
         score: res.score,
         reasons: res.reasons,
-        close: res.metrics.close, rsi14: res.metrics.rsi14, 
-        ma20: res.metrics.ma20, ma50: res.metrics.ma50,
-        atr14: res.metrics.atr14, vol_ratio: res.metrics.vol_ratio,
-        foreign_net: res.metrics.foreign_net
+        
+        // FIX: Explicit mapping with safety check
+        close: safe(res.metrics.close), 
+        rsi14: safe(res.metrics.rsi14), 
+        ma20: safe(res.metrics.ma20), 
+        ma50: safe(res.metrics.ma50),
+        atr14: safe(res.metrics.atr14), 
+        vol_ratio: safe(res.metrics.vol_ratio),
+        foreign_net: safe(res.metrics.foreign_net)
       });
     }
 
@@ -346,10 +333,9 @@ elBtnAnalyze.onclick = async () => {
 };
 
 /* =========================
-   Supabase Ops (Complete)
+   Supabase Ops
 ========================= */
 async function upsertSymbols(rows) {
-  // Use map to unique
   const unique = new Map();
   rows.forEach(r => unique.set(r.symbol, { symbol: r.symbol, name: r.name }));
   const { error } = await sb.from("symbols").upsert([...unique.values()], { onConflict: "symbol" });
@@ -359,20 +345,20 @@ async function upsertSymbols(rows) {
 async function upsertPrices(rows) {
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
-    // FIX: Include name, prev, chg, etc. Skip foreign_net.
+    // FIX: Include name, prev, chg, etc. Skip foreign_net (Generated).
     const part = rows.slice(i, i + CHUNK).map(r => ({
       trade_date: r.trade_date, 
       symbol: r.symbol,
-      name: r.name,          // Added
-      prev: r.prev,          // Added
+      name: r.name,          
+      prev: r.prev,          
       open: r.open, 
       high: r.high, 
       low: r.low, 
       close: r.close,
-      chg: r.chg,            // Added
+      chg: r.chg,            
       volume: r.volume,
-      value: r.value,        // Added
-      freq: r.freq,          // Added
+      value: r.value,        
+      freq: r.freq,          
       foreign_buy: r.foreign_buy || 0,
       foreign_sell: r.foreign_sell || 0
     }));
@@ -395,10 +381,11 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   const startISO = start.toISOString().slice(0, 10);
   
   let all = [];
-  const CHUNK = 100; // split symbols
+  const CHUNK = 100;
   for(let i=0; i<symbols.length; i+=CHUNK){
+    // FIX: Select foreign_buy/sell explicitly, not foreign_net
     const { data, error } = await sb.from("prices_daily")
-      .select("trade_date,symbol,open,high,low,close,volume,foreign_net")
+      .select("trade_date,symbol,open,high,low,close,volume,foreign_buy,foreign_sell")
       .in("symbol", symbols.slice(i, i+CHUNK))
       .gte("trade_date", startISO).lte("trade_date", endDateISO)
       .order("trade_date", {ascending: true});
@@ -480,7 +467,7 @@ function scoreSwing(series) {
   const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i];
   const VR = (VM && VM>0) ? V/VM : 0;
   
-  if(!M50 || !R || !A) return { signal: "WAIT", score: 0, reasons: ["Data kurang"], metrics: {} };
+  if(!M50 || !R || !A) return { signal: "WAIT", score: 0, reasons: ["Data kurang"], metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
 
   let sc = 0, rs = [];
   if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
