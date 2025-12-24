@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Swing Screener</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/technicalindicators/3.1.0/browser.js"></script>
+    
+    <style>
+        /* Agar kolom pertama (Kode) tetap diam saat scroll horizontal */
+        .sticky-col {
+            position: sticky;
+            left: 0;
+            background-color: white;
+            z-index: 10;
+            border-right: 2px solid #e5e7eb;
+        }
+        th.sticky-col { background-color: #f3f4f6; }
+        /* Style scrollbar */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="bg-gray-100 p-6">
+
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6 text-gray-800">Stock Swing Screener</h1>
+
+        <div class="bg-white p-6 rounded-lg shadow mb-6">
+            <h2 class="text-xl font-semibold mb-4">Upload Data Harian (CSV)</h2>
+            <input type="file" id="fileInput" accept=".csv" class="mb-4 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+            <button onclick="processFile()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Upload & Update</button>
+            <p id="uploadStatus" class="mt-2 text-sm text-gray-600"></p>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow overflow-hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Market Overview (Data Terakhir)</h2>
+                <button onclick="loadAndCalculate()" class="bg-green-600 text-white px-4 py-2 rounded text-sm">Refresh Data</button>
+            </div>
+            
+            <div class="overflow-x-auto relative shadow-md sm:rounded-lg" style="max-height: 80vh;">
+                <table class="w-full text-sm text-left text-gray-500">
+                    <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                        <tr id="tableHeader">
+                            </tr>
+                    </thead>
+                    <tbody id="stockTableBody">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- KONFIGURASI SUPABASE ---
+        const supabaseUrl = 'https://cannnetigbzlesfhhiwr.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhbm5uZXRpZ2J6bGVzZmhoaXdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDQ1MDksImV4cCI6MjA4MjEyMDUwOX0.z9W9mPPoLlPoa7XdL6I0rsg9EeQy54wfNgyJ_tzF_Ns';
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        // --- SKEMA KOLOM UNTUK TABEL ---
+        const columns = [
+            { key: 'symbol', label: 'Kode', sticky: true },
+            { key: 'date', label: 'Tanggal' },
+            { key: 'close', label: 'Price', type: 'number' },
+            { key: 'ma20', label: 'MA20', type: 'number' },
+            { key: 'ema20', label: 'EMA20', type: 'number' },
+            { key: 'sma50', label: 'SMA50', type: 'number' },
+            { key: 'avgVol20', label: 'Avg Vol 20', type: 'number' },
+            { key: 'volMaRatio', label: 'Vol > MA', type: 'text' }, // Volume vs MA Volume
+            { key: 'netForeign', label: 'Net Foreign', type: 'number' },
+            { key: 'trend', label: 'Status Tren', type: 'text' },
+            { key: 'rsi', label: 'RSI (14)', type: 'number' },
+            { key: 'macd', label: 'MACD', type: 'text' }, // Histogram/Signal
+            { key: 'atr', label: 'ATR', type: 'number' },
+            { key: 'bb', label: 'Bollinger Band', type: 'text' }, // Upper/Lower Pos
+            { key: 'marketCap', label: 'Market Cap', type: 'number' }
+        ];
+
+        let tableData = [];
+        let sortCol = 'symbol';
+        let sortAsc = true;
+
+        // --- 1. PROSES UPLOAD FILE ---
+        function processFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const status = document.getElementById('uploadStatus');
+
+            if (!file) return alert("Pilih file CSV dulu!");
+
+            status.innerText = "Membaca file...";
+            
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: async function(results) {
+                    const rows = results.data;
+                    const upsertData = [];
+
+                    // Mapping dari nama kolom CSV (Bahasa Indonesia) ke Database
+                    rows.forEach(row => {
+                        // Pastikan data valid
+                        if(row['Kode Saham'] && row['Tanggal Perdagangan Terakhir']) {
+                            upsertData.push({
+                                symbol: row['Kode Saham'],
+                                date: convertDate(row['Tanggal Perdagangan Terakhir']), // Perlu format YYYY-MM-DD
+                                open: parseFloat(row['Open Price']) || 0,
+                                high: parseFloat(row['Tertinggi']) || 0,
+                                low: parseFloat(row['Terendah']) || 0,
+                                close: parseFloat(row['Penutupan']) || 0,
+                                volume: parseInt(row['Volume']) || 0,
+                                foreign_buy: parseInt(row['Foreign Buy']) || 0,
+                                foreign_sell: parseInt(row['Foreign Sell']) || 0,
+                                listed_shares: parseInt(row['Listed Shares']) || 0
+                            });
+                        }
+                    });
+
+                    status.innerText = `Mengupload ${upsertData.length} baris ke Supabase...`;
+                    
+                    // Upsert ke Supabase (Batching per 1000 agar tidak timeout)
+                    const batchSize = 1000;
+                    for (let i = 0; i < upsertData.length; i += batchSize) {
+                        const batch = upsertData.slice(i, i + batchSize);
+                        const { error } = await supabase.from('stock_candles').upsert(batch, { onConflict: 'symbol, date' });
+                        if (error) {
+                            console.error(error);
+                            status.innerText = "Error Upload: " + error.message;
+                            return;
+                        }
+                    }
+
+                    status.innerText = "Upload Selesai! Data berhasil diperbarui.";
+                    loadAndCalculate(); // Refresh tabel otomatis
+                }
+            });
+        }
+
+        // Helper: Convert DD-MM-YYYY atau format lain ke YYYY-MM-DD
+        function convertDate(dateStr) {
+            // Asumsi format di CSV adalah YYYY-MM-DD (seperti contoh file Anda)
+            // Jika formatnya berbeda, sesuaikan di sini.
+            return dateStr; 
+        }
+
+        // --- 2. FETCH DATA & HITUNG INDIKATOR ---
+        async function loadAndCalculate() {
+            const status = document.getElementById('uploadStatus');
+            status.innerText = "Mengambil data histori...";
+            
+            // Ambil data 100 hari terakhir untuk semua saham (untuk hitung MA50/RSI butuh history)
+            // Di production app, ini sebaiknya dilakukan di backend (Edge Function)
+            const { data, error } = await supabase
+                .from('stock_candles')
+                .select('*')
+                .order('date', { ascending: true }); // Urutkan dari lama ke baru untuk perhitungan
+
+            if (error) return alert("Gagal ambil data: " + error.message);
+
+            // Grouping data by Symbol
+            const stockHistory = {};
+            data.forEach(d => {
+                if (!stockHistory[d.symbol]) stockHistory[d.symbol] = [];
+                stockHistory[d.symbol].push(d);
+            });
+
+            const processedData = [];
+
+            // Iterasi setiap saham untuk hitung indikator
+            Object.keys(stockHistory).forEach(symbol => {
+                const history = stockHistory[symbol];
+                const last = history[history.length - 1]; // Data Hari Terakhir
+                const closes = history.map(d => d.close);
+                const volumes = history.map(d => d.volume);
+                const highs = history.map(d => d.high);
+                const lows = history.map(d => d.low);
+
+                // --- KALKULASI TEKNIKAL (Library) ---
+                // Pastikan history cukup panjang
+                if (history.length < 50) return; 
+
+                const ma20 = technicalIndicators.SMA.calculate({period: 20, values: closes});
+                const sma50 = technicalIndicators.SMA.calculate({period: 50, values: closes});
+                const ema20 = technicalIndicators.EMA.calculate({period: 20, values: closes});
+                const rsi = technicalIndicators.RSI.calculate({period: 14, values: closes});
+                const macd = technicalIndicators.MACD.calculate({
+                    values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false
+                });
+                const atr = technicalIndicators.ATR.calculate({period: 14, high: highs, low: lows, close: closes});
+                const bb = technicalIndicators.BollingerBands.calculate({period: 20, values: closes, stdDev: 2});
+                const volMa20 = technicalIndicators.SMA.calculate({period: 20, values: volumes});
+
+                // Ambil nilai terakhir dari array hasil perhitungan
+                const lastMa20 = ma20[ma20.length - 1] || 0;
+                const lastEma20 = ema20[ema20.length - 1] || 0;
+                const lastSma50 = sma50[sma50.length - 1] || 0;
+                const lastVolMa = volMa20[volMa20.length - 1] || 0;
+                const lastRsi = rsi[rsi.length - 1] || 0;
+                const lastMacd = macd[macd.length - 1] || {histogram: 0};
+                const lastAtr = atr[atr.length - 1] || 0;
+                const lastBb = bb[bb.length - 1] || {upper: 0, lower: 0};
+
+                // Logic Tambahan
+                const netForeign = last.foreign_buy - last.foreign_sell;
+                const marketCap = last.close * last.listed_shares;
+                const trendStatus = last.close > lastMa20 ? "UPTREND" : "DOWNTREND";
+                const volumeStatus = last.volume > lastVolMa ? "SPIKE" : "NORMAL";
+                
+                // Posisi BB (Sedang di atas/bawah)
+                let bbPos = "Middle";
+                if(last.close > lastBb.upper) bbPos = "Over Upper";
+                if(last.close < lastBb.lower) bbPos = "Below Lower";
+
+                processedData.push({
+                    symbol: symbol,
+                    date: last.date,
+                    close: last.close,
+                    ma20: lastMa20.toFixed(0),
+                    ema20: lastEma20.toFixed(0),
+                    sma50: lastSma50.toFixed(0),
+                    avgVol20: lastVolMa.toFixed(0),
+                    volMaRatio: volumeStatus,
+                    netForeign: netForeign,
+                    trend: trendStatus,
+                    rsi: lastRsi.toFixed(1),
+                    macd: lastMacd.histogram.toFixed(2),
+                    atr: lastAtr.toFixed(0),
+                    bb: bbPos,
+                    marketCap: marketCap
+                });
+            });
+
+            tableData = processedData;
+            renderHeader();
+            renderTable();
+            status.innerText = "Data siap.";
+        }
+
+        // --- 3. RENDER TABEL & SORTING ---
+        function renderHeader() {
+            const tr = document.getElementById('tableHeader');
+            tr.innerHTML = '';
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.className = `px-6 py-3 cursor-pointer hover:bg-gray-200 ${col.sticky ? 'sticky-col' : ''}`;
+                th.innerHTML = `${col.label} ${sortCol === col.key ? (sortAsc ? '▲' : '▼') : ''}`;
+                th.onclick = () => handleSort(col.key);
+                tr.appendChild(th);
+            });
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('stockTableBody');
+            tbody.innerHTML = '';
+
+            tableData.forEach((row, i) => {
+                const tr = document.createElement('tr');
+                tr.className = "bg-white border-b hover:bg-gray-50";
+
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = `px-6 py-4 ${col.sticky ? 'sticky-col font-bold text-gray-900' : ''}`;
+                    
+                    let val = row[col.key];
+                    
+                    // Formatting Angka
+                    if (col.type === 'number') {
+                        val = new Intl.NumberFormat('id-ID').format(val);
+                    }
+
+                    // Coloring Logic (Contoh)
+                    if (col.key === 'trend') {
+                        td.innerHTML = `<span class="${val === 'UPTREND' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-1 rounded-full text-xs font-semibold">${val}</span>`;
+                    } else if (col.key === 'rsi') {
+                         td.className += val > 70 ? ' text-red-600 font-bold' : (val < 30 ? ' text-green-600 font-bold' : '');
+                         td.innerText = val;
+                    } else {
+                        td.innerText = val;
+                    }
+                    
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        function handleSort(key) {
+            if (sortCol === key) {
+                sortAsc = !sortAsc;
+            } else {
+                sortCol = key;
+                sortAsc = true;
+            }
+            
+            tableData.sort((a, b) => {
+                let valA = a[key];
+                let valB = b[key];
+
+                // Convert to number if sorting number columns (remove strings like decimals if needed before sort)
+                if(!isNaN(parseFloat(valA)) && !isNaN(parseFloat(valB))) {
+                    valA = parseFloat(valA);
+                    valB = parseFloat(valB);
+                }
+
+                if (valA < valB) return sortAsc ? -1 : 1;
+                if (valA > valB) return sortAsc ? 1 : -1;
+                return 0;
+            });
+            
+            renderHeader();
+            renderTable();
+        }
+    </script>
+</body>
+</html>
