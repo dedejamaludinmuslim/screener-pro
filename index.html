@@ -36,7 +36,8 @@
 
         <button id="btnUpload" class="btn" disabled>Upload → Supabase</button>
         <button id="btnAnalyze" class="btn ghost" disabled>Analisis Swing</button>
-        </div>
+        <button id="btnRefresh" class="btn ghost">Refresh</button>
+      </div>
 
       <div class="row wrap">
         <div class="pill" id="pillStatus">Status: menunggu file</div>
@@ -44,27 +45,39 @@
         <div class="pill mono" id="pillRows">Rows: -</div>
       </div>
 
-      <div class="panel panel-full">
-        <div class="panel-title">Sinyal Swing (Top)</div>
-        <div class="row wrap">
-          <input id="search" class="search" placeholder="Cari simbol…" />
-          <select id="filterSignal" class="select">
-            <option value="ALL">Semua</option>
-            <option value="BUY">BUY</option>
-            <option value="SELL">SELL</option>
-            <option value="WAIT">WAIT</option>
-          </select>
+      <div class="split">
+        <div class="panel">
+          <div class="panel-title">Preview (10 baris)</div>
+          <div class="table-wrap">
+            <table class="table" id="previewTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
 
-        <div class="table-wrap">
-          <table class="table" id="signalsTable">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <div class="panel">
+          <div class="panel-title">Sinyal Swing (Top)</div>
+          <div class="row wrap">
+            <input id="search" class="search" placeholder="Cari simbol…" />
+            <select id="filterSignal" class="select">
+              <option value="ALL">Semua</option>
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+              <option value="WAIT">WAIT</option>
+            </select>
+          </div>
 
-        <div class="hint">
-          Sinyal = rule-based scoring untuk disiplin swing, bukan ramalan.
+          <div class="table-wrap">
+            <table class="table" id="signalsTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="hint">
+            Sinyal = rule-based scoring untuk disiplin swing, bukan ramalan.
+          </div>
         </div>
       </div>
     </section>
