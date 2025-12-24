@@ -69,8 +69,26 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 }
 .btn-action:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px var(--accent-glow); }
 .btn-action:disabled { background: var(--border); color: var(--dim); box-shadow: none; }
-.btn-login { border: 1px solid var(--border); color: #fff; }
-.btn-logout { border: 1px solid var(--sell); color: var(--sell); }
+/* Cari dan GANTI bagian .btn-login & .btn-logout dengan ini */
+
+.btn-login { 
+  border: 1px solid var(--border); 
+  color: #fff; 
+}
+
+/* UPDATE: Log Out jadi Solid Merah (Menimpa btn-action) */
+.btn-logout { 
+  background: var(--sell) !important; /* Merah Solid */
+  color: #fff !important;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3) !important; /* Glow Merah */
+  border: none !important;
+}
+
+.btn-logout:hover {
+  background: #dc2626 !important; /* Merah lebih gelap saat hover */
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5) !important;
+  transform: translateY(-2px);
+}
 
 /* MAIN AREA */
 .main { display: flex; flex-direction: column; height: 100%; overflow: hidden; position: relative; }
