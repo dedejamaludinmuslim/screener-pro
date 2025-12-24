@@ -15,11 +15,8 @@
   <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- XLSX parser (SheetJS) -->
-  <script defer
-  src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"
-  onerror="var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js'; s.defer=true; document.head.appendChild(s);"></script>
-
-  <!-- App -->
+  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"
+  onerror="var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js'; s.defer=true; document.head.appendChild(s);"></script>
   <script defer src="./app.js"></script>
 
 </head>
@@ -42,7 +39,7 @@
 
       <div class="row wrap">
         <label class="file">
-          <input id="fileInput" type="file" accept=".xlsx" />
+          <input id="fileInput" type="file" accept=".csv,text/csv" />
           <span class="btn">Pilih File .xlsx</span>
         </label>
 
