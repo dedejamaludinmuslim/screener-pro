@@ -1,7 +1,7 @@
 /* =========================================================
    Swing Signals Pro
-   - Layout Update: Sector/Score/Signal Moved to End
-   - Font Size Fix for Sector
+   - Security: Simple User Table Login
+   - Restricted Access (Locked Columns, Hidden Buttons)
 ========================================================= */
 
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
@@ -26,13 +26,88 @@ const elFilterCategory = $("filterCategory");
 const elScoreSlider = $("scoreSlider");
 const elScoreVal = $("scoreVal");
 
+// Login UI Elements
+const elBtnLogin = $("btnLogin");
+const elBtnLogout = $("btnLogout");
+const elModal = $("loginModal");
+const elAdminControls = $("adminControls");
+
 let lastParsed = { tradeDateISO: null, rows: [], type: 'price' };
 let cachedSignals = [];
 let symbolMeta = {}; 
 let tempXlsxFiles = []; 
 let latestDbDate = null; 
 
-/* WATCHLIST SYSTEM */
+// AUTH STATE
+let isLoggedIn = false;
+
+/* --- AUTH LOGIC --- */
+function checkAuth() {
+  const sess = localStorage.getItem("swing_auth");
+  isLoggedIn = sess === "true";
+  updateUIState();
+}
+
+function updateUIState() {
+  if (isLoggedIn) {
+    // ADMIN VIEW
+    elAdminControls.style.display = "flex";
+    elBtnLogin.style.display = "none";
+    elBtnLogout.style.display = "block";
+    elScoreSlider.max = "95"; // Full range
+  } else {
+    // PUBLIC VIEW
+    elAdminControls.style.display = "none";
+    elBtnLogin.style.display = "block";
+    elBtnLogout.style.display = "none";
+    
+    // Slider Limit 50%
+    elScoreSlider.max = "50"; 
+    if (parseInt(elScoreSlider.value) > 50) {
+      elScoreSlider.value = 0;
+      elScoreVal.textContent = "0";
+    }
+  }
+  // Re-render table to show/hide locks
+  renderSignals(cachedSignals);
+}
+
+// Event Listeners Auth
+elBtnLogin.onclick = () => elModal.style.display = "flex";
+$("btnCloseLogin").onclick = () => elModal.style.display = "none";
+elBtnLogout.onclick = () => {
+  localStorage.removeItem("swing_auth");
+  isLoggedIn = false;
+  toast("Berhasil Logout.");
+  updateUIState();
+};
+
+$("btnSubmitLogin").onclick = async () => {
+  const u = $("username").value;
+  const p = $("password").value;
+  
+  toast("Sedang login...");
+  // Simple check to 'users' table
+  const { data, error } = await sb
+    .from("users")
+    .select("*")
+    .eq("username", u)
+    .eq("password", p) // Note: In production, hash passwords!
+    .single();
+
+  if (data) {
+    localStorage.setItem("swing_auth", "true");
+    isLoggedIn = true;
+    elModal.style.display = "none";
+    $("username").value = ""; $("password").value = "";
+    toast("Login Berhasil! Mode Admin Aktif.");
+    updateUIState();
+  } else {
+    toast("Username/Password Salah!", true);
+  }
+};
+
+/* WATCHLIST */
 function getWatchlist() { try { return JSON.parse(localStorage.getItem("swing_watchlist")) || {}; } catch { return {}; } }
 function toggleWatchlist(symbol) {
   const wl = getWatchlist();
@@ -42,32 +117,40 @@ function toggleWatchlist(symbol) {
   renderSignals(cachedSignals);
 }
 
-/* Sorting & Columns (UPDATED ORDER) */
+/* Sorting & Columns */
 let sortKey = "score";
 let sortDir = -1;
 
 const COLS = [
-  // 1. Sticky Identity
   { key: "wl", label: "★", type: "text" },
   { key: "symbol", label: "Symbol", type: "text" },
-  
-  // 2. Market Data (Moved to Middle)
   { key: "close", label: "Close", type: "num" },
   { key: "rsi14", label: "RSI14", type: "num" },
   { key: "ma20", label: "MA20", type: "num" },
   { key: "ma50", label: "MA50", type: "num" },
   { key: "vol_ratio", label: "VolR", type: "num" },
   { key: "foreign_net", label: "FNet", type: "num" },
-
-  // 3. Analysis Result (Moved to End - The requested 4 columns)
+  // LOCKED COLUMNS
   { key: "sector", label: "Sektor", type: "text" },
-  { key: "score", label: "Score", type: "num" },
-  { key: "signal", label: "Signal", type: "text" },
-  { key: "reasons", label: "Reasons", type: "text" },
+  { key: "score", label: "Score", type: "num", locked: true },
+  { key: "signal", label: "Signal", type: "text", locked: true },
+  { key: "reasons", label: "Reasons", type: "text", locked: true },
 ];
 
 function sortBadgeFor(key){ if (sortKey !== key) return ""; return sortDir === 1 ? "▲" : "▼"; }
-function setSort(key){ if (sortKey !== key){ sortKey = key; sortDir = -1; return; } sortDir = sortDir === -1 ? 1 : (sortDir === 1 ? 0 : -1); }
+
+function setSort(key){ 
+  // SECURITY: Prevent sorting locked columns if not logged in
+  const colDef = COLS.find(c => c.key === key);
+  if (!isLoggedIn && colDef && colDef.locked) {
+    toast("Login untuk mengurutkan kolom ini.", true);
+    return;
+  }
+
+  if (sortKey !== key){ sortKey = key; sortDir = -1; return; } 
+  sortDir = sortDir === -1 ? 1 : (sortDir === 1 ? 0 : -1); 
+}
+
 function cmp(a, b, col){
   if (col.key === "wl") { const wl = getWatchlist(); return (wl[a.symbol]?1:0) - (wl[b.symbol]?1:0); }
   if (col.key === "sector") { const sa = symbolMeta[a.symbol]?.sector || "ZZ"; const sb = symbolMeta[b.symbol]?.sector || "ZZ"; return sa.localeCompare(sb); }
@@ -174,7 +257,12 @@ async function loadMetadata() { const { data } = await sb.from("symbols").select
 
 function renderSignals(rows) {
   const thead = elSignals.querySelector("thead");
-  thead.innerHTML = "<tr>" + COLS.map(c => `<th class="sortable" onclick="setSort('${c.key}');renderSignals(cachedSignals)">${c.label} ${sortBadgeFor(c.key)}</th>`).join("") + "</tr>";
+  thead.innerHTML = "<tr>" + COLS.map(c => {
+    // SECURITY: Add visual cue for disabled sorting
+    const disabledClass = (!isLoggedIn && c.locked) ? "sort-disabled" : "sortable";
+    const onClick = (!isLoggedIn && c.locked) ? "" : `setSort('${c.key}');renderSignals(cachedSignals)`;
+    return `<th class="${disabledClass}" onclick="${onClick}">${c.label} ${sortBadgeFor(c.key)}</th>`;
+  }).join("") + "</tr>";
   
   const minScore = parseInt(elScoreSlider.value);
   const filterSig = elFilterSignal.value;
@@ -193,7 +281,7 @@ function renderSignals(rows) {
     return true;
   });
 
-  const col = COLS.find(c=>c.key===sortKey) || COLS[9]; // Sort by Score default (now index 9 approx)
+  const col = COLS.find(c=>c.key===sortKey) || COLS[9]; 
   if(sortDir!==0) d.sort((a,b)=>cmp(a,b,col)*sortDir);
 
   elSignals.querySelector("tbody").innerHTML = d.map(r => {
@@ -203,6 +291,22 @@ function renderSignals(rows) {
     const isNew = isWl && (watchlist[r.symbol] === todayISO || watchlist[r.symbol] === latestDbDate);
     const meta = symbolMeta[r.symbol] || { sector: "-", is_sharia: false };
     const shariaBadge = meta.is_sharia ? '<span title="Syariah" style="cursor:help; font-size:10px">🕌</span>' : '';
+
+    // SECURITY: LOCK CONTENT
+    const lockIcon = `<span class="locked-cell"><span class="locked-icon">🔒</span> Premium</span>`;
+    
+    // Display Logic
+    const displayScore = isLoggedIn ? (
+        `<span class="${r.score >= 80 ? 'highlight' : ''}">${fmt(r.score)}</span>`
+    ) : lockIcon;
+    
+    const displaySignal = isLoggedIn ? (
+        `<span class="badge ${r.signal.toLowerCase()}">${r.signal}</span>`
+    ) : lockIcon;
+
+    const displayReasons = isLoggedIn ? (
+        `<span title="${escapeHtml(reasonsStr)}">${escapeHtml(reasonsStr)}</span>`
+    ) : `<span class="locked-cell"><span class="locked-icon">🔒</span> Login to view details</span>`;
 
     return `
     <tr>
@@ -220,15 +324,23 @@ function renderSignals(rows) {
       <td class="mono">${fmt(r.foreign_net)}</td>
 
       <td style="font-size:12px; color:#ccc">${escapeHtml(meta.sector)}</td>
-      <td class="mono ${r.score >= 80 ? 'highlight' : ''}">${fmt(r.score)}</td>
-      <td><span class="badge ${r.signal.toLowerCase()}">${r.signal}</span></td>
-      <td title="${escapeHtml(reasonsStr)}">${escapeHtml(reasonsStr)}</td>
+      
+      <td class="mono">${displayScore}</td>
+      <td>${displaySignal}</td>
+      <td>${displayReasons}</td>
     </tr>`;
   }).join("") || "<tr><td colspan='12' class='dim' style='text-align:center; padding:20px'>Data kosong / Tidak sesuai filter</td></tr>";
 }
 
 /* --- Shared Logic --- */
-elScoreSlider.oninput = (e) => { elScoreVal.textContent = e.target.value; renderSignals(cachedSignals); };
+elScoreSlider.oninput = (e) => { 
+  // Security enforce on slider drag
+  if (!isLoggedIn && e.target.value > 50) {
+    e.target.value = 50; // clamp
+  }
+  elScoreVal.textContent = e.target.value; 
+  renderSignals(cachedSignals); 
+};
 elSearch.oninput = () => renderSignals(cachedSignals);
 elFilterSignal.onchange = () => renderSignals(cachedSignals);
 elFilterCategory.onchange = () => renderSignals(cachedSignals);
@@ -263,6 +375,9 @@ function scoreSwing(series) {
 
 async function refreshSignals(){
   try {
+    // Check auth on refresh
+    checkAuth();
+
     await loadMetadata();
     let d = lastParsed.tradeDateISO; 
     if (!d) { latestDbDate = await fetchLatestTradeDate(); d = latestDbDate; }

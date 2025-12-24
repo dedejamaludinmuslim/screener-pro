@@ -2,7 +2,8 @@
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" /> <title>Swing Signals Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+  <title>Swing Signals Pro</title>
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,19 +38,23 @@
       </div>
 
       <div class="control-group">
-        <label class="btn-primary-upload">
-          <input id="fileInput" type="file" multiple accept=".csv,.xlsx" />
-          <span>📂 Upload Data</span>
-        </label>
-        <button id="btnConvert" class="btn-ghost" disabled>Convert & Zip</button>
-        <button id="btnUpload" class="btn-ghost" disabled>Push DB</button>
-        <button id="btnAnalyze" class="btn-action" disabled>⚡ Analisis</button>
+        <div id="adminControls" style="display:none; width:100%; gap:10px; flex-direction:column;">
+          <label class="btn-primary-upload">
+            <input id="fileInput" type="file" multiple accept=".csv,.xlsx" />
+            <span>📂 Upload Data</span>
+          </label>
+          <button id="btnConvert" class="btn-ghost" disabled>Convert & Zip</button>
+          <button id="btnUpload" class="btn-ghost" disabled>Push DB</button>
+          <button id="btnAnalyze" class="btn-action" disabled>⚡ Analisis</button>
+        </div>
+
+        <button id="btnLogin" class="btn-ghost" style="width:100%; border:1px solid var(--border); margin-top:10px;">🔒 Login Admin</button>
+        <button id="btnLogout" class="btn-ghost" style="display:none; width:100%; color:var(--sell); border:1px solid var(--sell);">Log Out</button>
       </div>
     </aside>
 
     <main class="main">
       <header class="toolbar">
-        
         <div class="tool-section start">
           <div class="input-wrap">
             <span class="icon">🔍</span>
@@ -66,7 +71,6 @@
               <option value="WAIT">Sinyal: WAIT</option>
               <option value="WATCHLIST">★ Watchlist</option>
             </select>
-            
             <select id="filterCategory">
               <option value="ALL">Tipe: Semua</option>
               <option value="SHARIA">🕌 Syariah</option>
@@ -81,7 +85,6 @@
             <input type="range" id="scoreSlider" min="0" max="95" value="0" step="5">
           </div>
         </div>
-
       </header>
 
       <div class="table-container">
@@ -91,6 +94,18 @@
         </table>
       </div>
     </main>
+  </div>
+
+  <div id="loginModal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+      <h3 style="margin-top:0">Login Admin</h3>
+      <input type="text" id="username" placeholder="Username" class="modal-input">
+      <input type="password" id="password" placeholder="Password" class="modal-input">
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button id="btnSubmitLogin" class="btn-action">Masuk</button>
+        <button id="btnCloseLogin" class="btn-ghost">Batal</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
