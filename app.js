@@ -2,8 +2,8 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
-   - FIX: Manual Calculation for Net Foreign in Signals
-   - FIX: Explicit Metric Mapping
+   - FIX: Dashboard loads latest ANALYZED date (not just price date)
+   - FIX: Robust rendering for JSONB columns
 ========================================================= */
 
 /* =========================
@@ -276,17 +276,14 @@ elBtnAnalyze.onclick = async () => {
     const { tradeDateISO, rows } = lastParsed;
     if (!tradeDateISO) return;
     
-    // Optimasi: Ambil symbols dari data terakhir saja untuk hemat
     const symbols = [...new Set(rows.map(r => r.symbol))];
     
     toast(`Analisis per tanggal: ${tradeDateISO} (Lookback 160 hari)`);
-    // FIX: Fetch foreign_buy & sell explicitly to manually calc net
     const history = await fetchHistoryForSymbols(symbols, tradeDateISO, 160);
 
     const bySym = new Map();
     history.forEach(r => {
       if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
-      // FIX: Calculate Foreign Net in JS to avoid DB Generated Column issues during read
       const fNet = (Number(r.foreign_buy) || 0) - (Number(r.foreign_sell) || 0);
       bySym.get(r.symbol).push({ ...r, foreign_net: fNet });
     });
@@ -297,8 +294,6 @@ elBtnAnalyze.onclick = async () => {
       if (series[series.length - 1]?.trade_date !== tradeDateISO) continue;
 
       const res = scoreSwing(series);
-      
-      // FIX: Check if metric is invalid, convert to null explicitly
       const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val;
 
       out.push({
@@ -307,9 +302,7 @@ elBtnAnalyze.onclick = async () => {
         strategy: "SWING_V1",
         signal: res.signal,
         score: res.score,
-        reasons: res.reasons,
-        
-        // FIX: Explicit mapping with safety check
+        reasons: res.reasons, // Array of strings
         close: safe(res.metrics.close), 
         rsi14: safe(res.metrics.rsi14), 
         ma20: safe(res.metrics.ma20), 
@@ -345,7 +338,6 @@ async function upsertSymbols(rows) {
 async function upsertPrices(rows) {
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
-    // FIX: Include name, prev, chg, etc. Skip foreign_net (Generated).
     const part = rows.slice(i, i + CHUNK).map(r => ({
       trade_date: r.trade_date, 
       symbol: r.symbol,
@@ -383,7 +375,6 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   let all = [];
   const CHUNK = 100;
   for(let i=0; i<symbols.length; i+=CHUNK){
-    // FIX: Select foreign_buy/sell explicitly, not foreign_net
     const { data, error } = await sb.from("prices_daily")
       .select("trade_date,symbol,open,high,low,close,volume,foreign_buy,foreign_sell")
       .in("symbol", symbols.slice(i, i+CHUNK))
@@ -395,6 +386,28 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   return all;
 }
 
+// FIX: Prioritize latest SIGNAL date, fallback to PRICE date
+async function fetchLatestTradeDate() {
+  // 1. Cek tanggal terbaru yang sudah ada SINYAL
+  const { data: sData } = await sb.from("signals_daily")
+    .select("trade_date")
+    .eq("strategy", "SWING_V1")
+    .order("trade_date", {ascending:false})
+    .limit(1);
+  
+  if (sData && sData.length > 0) {
+    return sData[0].trade_date; // Gunakan ini agar tabel tidak kosong
+  }
+
+  // 2. Jika belum ada sinyal sama sekali, cek tanggal harga terbaru
+  const { data: pData } = await sb.from("prices_daily")
+    .select("trade_date")
+    .order("trade_date", {ascending:false})
+    .limit(1);
+    
+  return pData?.[0]?.trade_date;
+}
+
 async function fetchSignalsLatest(dateISO) {
   const { data, error } = await sb.from("signals_daily")
     .select("symbol,signal,score,reasons,close,rsi14,ma20,ma50,vol_ratio,foreign_net")
@@ -402,11 +415,6 @@ async function fetchSignalsLatest(dateISO) {
     .order("score", { ascending: false }).limit(2000);
   if (error) throw error;
   return data || [];
-}
-
-async function fetchLatestTradeDate() {
-  const { data } = await sb.from("prices_daily").select("trade_date").order("trade_date", {ascending:false}).limit(1);
-  return data?.[0]?.trade_date;
 }
 
 /* =========================
@@ -467,7 +475,14 @@ function scoreSwing(series) {
   const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i];
   const VR = (VM && VM>0) ? V/VM : 0;
   
-  if(!M50 || !R || !A) return { signal: "WAIT", score: 0, reasons: ["Data kurang"], metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
+  if(!M50 || !R || !A) {
+    return { 
+      signal: "WAIT", 
+      score: 0, 
+      reasons: [`Data kurang (Hanya ${series.length} hari, butuh 50).`], 
+      metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } 
+    };
+  }
 
   let sc = 0, rs = [];
   if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
@@ -488,6 +503,15 @@ function scoreSwing(series) {
 /* =========================
    Render & Init
 ========================= */
+function parseReasons(r) {
+  if (Array.isArray(r)) return r;
+  if (typeof r === 'string') {
+    // Handle JSON string from DB
+    try { return JSON.parse(r); } catch { return [r]; }
+  }
+  return [];
+}
+
 function renderSignals(rows) {
   const thead = elSignals.querySelector("thead");
   thead.innerHTML = "<tr>" + COLS.map(c => `<th class="sortable" onclick="setSort('${c.key}');renderSignals(cachedSignals)">${c.label} ${sortBadgeFor(c.key)}</th>`).join("") + "</tr>";
@@ -496,7 +520,12 @@ function renderSignals(rows) {
   const col = COLS.find(c=>c.key===sortKey) || COLS[2];
   if(sortDir!==0) d.sort((a,b)=>cmp(a,b,col)*sortDir);
 
-  elSignals.querySelector("tbody").innerHTML = d.map(r => `
+  elSignals.querySelector("tbody").innerHTML = d.map(r => {
+    // Parsing reasons safely
+    const reasonsList = parseReasons(r.reasons);
+    const reasonsStr = reasonsList.join(", ");
+    
+    return `
     <tr>
       <td class="mono">${escapeHtml(r.symbol)}</td>
       <td><span class="badge ${r.signal.toLowerCase()}">${r.signal}</span></td>
@@ -507,18 +536,39 @@ function renderSignals(rows) {
       <td class="mono">${fmt2(r.ma50)}</td>
       <td class="mono">${fmt2(r.vol_ratio)}</td>
       <td class="mono">${fmt(r.foreign_net)}</td>
-      <td>${escapeHtml(r.reasons.join(", "))}</td>
-    </tr>`).join("") || "<tr><td colspan='10' class='dim'>No data</td></tr>";
+      <td title="${escapeHtml(reasonsStr)}">${escapeHtml(reasonsStr.slice(0, 50))}${reasonsStr.length>50?'...':''}</td>
+    </tr>`;
+  }).join("") || "<tr><td colspan='10' class='dim'>No data found for this date.</td></tr>";
 }
 
 async function refreshSignals(){
   try {
-    const d = lastParsed.tradeDateISO || await fetchLatestTradeDate();
+    // 1. Determine which date to show (Prefer parsed, then latest DB)
+    let d = lastParsed.tradeDateISO; 
+    
+    // If no file freshly parsed, fetch from DB
+    if (!d) {
+      d = await fetchLatestTradeDate();
+    }
+
     if(!d){ toast("Belum ada data."); return; }
+    
     elPillDate.textContent = `Date: ${d}`;
+    toast(`Memuat sinyal tanggal: ${d}...`);
+    
     cachedSignals = await fetchSignalsLatest(d);
+    
+    if (cachedSignals.length > 0) {
+      toast(`Berhasil memuat ${cachedSignals.length} baris.`);
+    } else {
+      toast(`Tidak ada sinyal untuk tanggal ${d}. Coba Analisis.`, true);
+    }
+    
     renderSignals(cachedSignals);
-  } catch(e) { console.error(e); }
+  } catch(e) { 
+    console.error(e); 
+    toast("Error loading signals: " + e.message, true);
+  }
 }
 
 elSearch.oninput = () => renderSignals(cachedSignals);
