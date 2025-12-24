@@ -1,8 +1,8 @@
 /* =========================================================
    Swing Signals Pro
-   - Slider Filter
-   - Smart Watchlist (New Badge)
-   - New Design Logic
+   - Smart Upload (Detect Price vs Metadata)
+   - Sharia & Sector Support
+   - Mobile Responsive
 ========================================================= */
 
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
@@ -23,41 +23,37 @@ const elPillRows = $("pillRows");
 const elSignals = $("signalsTable");
 const elSearch = $("search");
 const elFilterSignal = $("filterSignal");
+const elFilterCategory = $("filterCategory"); // BARU
 const elScoreSlider = $("scoreSlider");
 const elScoreVal = $("scoreVal");
 
-let lastParsed = { tradeDateISO: null, rows: [] };
+let lastParsed = { tradeDateISO: null, rows: [], type: 'price' }; // Type: price | meta
 let cachedSignals = [];
+let symbolMeta = {}; // Cache untuk Sektor & Syariah { 'BBCA': {sector: 'Finance', is_sharia: false} }
 let tempXlsxFiles = []; 
 let latestDbDate = null; 
 
-/* WATCHLIST SYSTEM (LocalStorage) */
-function getWatchlist() {
-  try { return JSON.parse(localStorage.getItem("swing_watchlist")) || {}; } 
-  catch { return {}; }
-}
+/* WATCHLIST SYSTEM */
+function getWatchlist() { try { return JSON.parse(localStorage.getItem("swing_watchlist")) || {}; } catch { return {}; } }
 function toggleWatchlist(symbol) {
   const wl = getWatchlist();
   const today = new Date().toISOString().slice(0,10);
-  
-  if (wl[symbol]) {
-    delete wl[symbol]; // Remove
-  } else {
-    wl[symbol] = today; // Add with date
-  }
+  if (wl[symbol]) delete wl[symbol]; else wl[symbol] = today;
   localStorage.setItem("swing_watchlist", JSON.stringify(wl));
-  renderSignals(cachedSignals); // Re-render to show star
+  renderSignals(cachedSignals);
 }
 
 /* Sorting & Columns */
 let sortKey = "score";
 let sortDir = -1;
 
+// Update Kolom Tabel (Tambah Sektor)
 const COLS = [
-  { key: "wl", label: "★", type: "text" }, // New Column
+  { key: "wl", label: "★", type: "text" },
   { key: "symbol", label: "Symbol", type: "text" },
   { key: "signal", label: "Signal", type: "text" },
   { key: "score", label: "Score", type: "num" },
+  { key: "sector", label: "Sektor", type: "text" }, // BARU
   { key: "close", label: "Close", type: "num" },
   { key: "rsi14", label: "RSI14", type: "num" },
   { key: "ma20", label: "MA20", type: "num" },
@@ -67,28 +63,21 @@ const COLS = [
   { key: "reasons", label: "Reasons", type: "text" },
 ];
 
-function sortBadgeFor(key){
-  if (sortKey !== key) return "";
-  return sortDir === 1 ? "▲" : "▼";
-}
-function setSort(key){
-  if (sortKey !== key){ sortKey = key; sortDir = -1; return; }
-  sortDir = sortDir === -1 ? 1 : (sortDir === 1 ? 0 : -1);
-}
+function sortBadgeFor(key){ if (sortKey !== key) return ""; return sortDir === 1 ? "▲" : "▼"; }
+function setSort(key){ if (sortKey !== key){ sortKey = key; sortDir = -1; return; } sortDir = sortDir === -1 ? 1 : (sortDir === 1 ? 0 : -1); }
 function cmp(a, b, col){
-  // Logic sort manual for watchlist
-  if (col.key === "wl") {
-    const wl = getWatchlist();
-    const wa = wl[a.symbol] ? 1 : 0;
-    const wb = wl[b.symbol] ? 1 : 0;
-    return wa - wb;
+  if (col.key === "wl") { const wl = getWatchlist(); return (wl[a.symbol]?1:0) - (wl[b.symbol]?1:0); }
+  
+  // Handle Sektor Sorting
+  if (col.key === "sector") {
+    const sa = symbolMeta[a.symbol]?.sector || "ZZ";
+    const sb = symbolMeta[b.symbol]?.sector || "ZZ";
+    return sa.localeCompare(sb);
   }
+
   const av = a[col.key], bv = b[col.key];
   if (col.key === "reasons") return String(av).localeCompare(String(bv));
-  if (col.type === "num"){
-    const an = Number(av || 0), bn = Number(bv || 0);
-    return an - bn;
-  }
+  if (col.type === "num"){ return Number(av || 0) - Number(bv || 0); }
   return String(av ?? "").localeCompare(String(bv ?? ""));
 }
 
@@ -102,67 +91,228 @@ function escapeHtml(str){ return String(str).replace(/[&<>"']/g, c => ({'&':'&am
 function num(x) { const n = Number(String(x || "").replace(/,/g, "")); return Number.isFinite(n) ? n : null; }
 function int(x) { return Math.trunc(num(x) || 0); }
 
-/* --- CSV & DB LOGIC (SAMA SEPERTI SEBELUMNYA) --- */
-/* (Saya singkat bagian ini agar fokus ke perubahan baru, logika intinya tetap sama) */
-
+/* --- CSV PARSER (SMART DETECT) --- */
 const MONTH_ID = { jan: "01", januari: "01", feb: "02", februari: "02", mar: "03", maret: "03", apr: "04", april: "04", mei: "05", jun: "06", juni: "06", jul: "07", juli: "07", agu: "08", agustus: "08", agt: "08", sep: "09", september: "09", okt: "10", oktober: "10", nov: "11", november: "11", des: "12", desember: "12" };
 function parseIDXDateToISO(s) { if (!s) return null; const raw = String(s).trim().replace(/\s+/g, " "); if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw; const parts = raw.split(" "); if (parts.length < 3) return null; const d = parts[0].padStart(2, "0"); const m = MONTH_ID[parts[1].toLowerCase()] || MONTH_ID[parts[1].slice(0,3).toLowerCase()]; if (!m) return null; return `${parts[2]}-${m}-${d}`; }
+
 function parseCSV(text) { const rows = [], len = text.length; let row = [], field = "", inQuotes = false; for (let i = 0; i < len; i++) { const c = text[i]; if (inQuotes) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; } else field += c; } else { if (c === '"') inQuotes = true; else if (c === ',') { row.push(field); field = ""; } else if (c === '\n') { row.push(field.replace(/\r$/, "")); field = ""; if (row.some(v => v !== "")) rows.push(row); row = []; } else field += c; } } if (field || row.length) { row.push(field.replace(/\r$/, "")); if (row.some(v => v !== "")) rows.push(row); } return rows; }
 
-async function processBatchCsvFiles(files) {
+async function processBatchFiles(files) {
   let allRows = [], foundDates = new Set();
+  let detectedType = null;
+
   for (const file of files) {
     const text = await file.text(); const grid = parseCSV(text); if (grid.length < 2) continue;
-    const header = grid[0].map(h => String(h || "").trim());
-    const rawRows = grid.slice(1).map(cols => { const obj = {}; header.forEach((h, i) => obj[h] = cols[i] ?? ""); return obj; });
-    const cleaned = rawRows.filter(r => r["Kode Saham"]).map(r => {
+    const header = grid[0].map(h => String(h || "").trim().toLowerCase()); // Lowercase header for check
+    
+    // SMART DETECT
+    if (header.includes("sektor") || header.includes("index")) {
+      // INI FILE SCREENER / METADATA
+      detectedType = 'meta';
+      const rawRows = grid.slice(1).map(cols => { const obj = {}; grid[0].forEach((h, i) => obj[String(h).trim()] = cols[i] ?? ""); return obj; });
+      
+      const metaRows = rawRows.filter(r => r["Kode Saham"]).map(r => {
+        const idxStr = (r["Index"] || "").toUpperCase();
+        // Cek Syariah: Ada kata ISSI, JII, atau DES
+        const isSharia = idxStr.includes("ISSI") || idxStr.includes("JII") || idxStr.includes("DES");
+        
+        return {
+          symbol: String(r["Kode Saham"]).trim(),
+          name: r["Nama Perusahaan"] || null,
+          sector: r["Sektor"] || "Lainnya",
+          is_sharia: isSharia
+        };
+      });
+      allRows = allRows.concat(metaRows);
+
+    } else if (header.includes("close") || header.includes("penutupan") || header.includes("tanggal perdagangan terakhir")) {
+      // INI FILE HARGA
+      detectedType = 'price';
+      const rawRows = grid.slice(1).map(cols => { const obj = {}; grid[0].forEach((h, i) => obj[String(h).trim()] = cols[i] ?? ""); return obj; });
+      
+      const priceRows = rawRows.filter(r => r["Kode Saham"]).map(r => {
         const tradeDateISO = parseIDXDateToISO(r["Tanggal Perdagangan Terakhir"]); if (tradeDateISO) foundDates.add(tradeDateISO);
-        return { trade_date: tradeDateISO, symbol: String(r["Kode Saham"]).trim(), name: r["Nama Perusahaan"] ? String(r["Nama Perusahaan"]).trim() : null, prev: num(r["Sebelumnya"]), open: num(r["Open Price"]), high: num(r["Tertinggi"]), low: num(r["Terendah"]), close: num(r["Penutupan"]), chg: num(r["Selisih"]), volume: int(r["Volume"]), value: num(r["Nilai"]), freq: int(r["Frekuensi"]), foreign_buy: int(r["Foreign Buy"]), foreign_sell: int(r["Foreign Sell"]) };
+        return {
+          trade_date: tradeDateISO,
+          symbol: String(r["Kode Saham"]).trim(),
+          name: r["Nama Perusahaan"] ? String(r["Nama Perusahaan"]).trim() : null,
+          prev: num(r["Sebelumnya"]), open: num(r["Open Price"]), high: num(r["Tertinggi"]), low: num(r["Terendah"]), close: num(r["Penutupan"]), chg: num(r["Selisih"]), volume: int(r["Volume"]), value: num(r["Nilai"]), freq: int(r["Frekuensi"]), foreign_buy: int(r["Foreign Buy"]), foreign_sell: int(r["Foreign Sell"])
+        };
       }).filter(r => r.trade_date);
-    allRows = allRows.concat(cleaned);
+      allRows = allRows.concat(priceRows);
+    }
   }
-  const sortedDates = Array.from(foundDates).sort(); const latestDate = sortedDates[sortedDates.length - 1] || null;
-  lastParsed = { tradeDateISO: latestDate, rows: allRows };
-  elPillDate.textContent = latestDate || "-"; elPillRows.textContent = allRows.length.toLocaleString("id-ID");
-  elBtnUpload.disabled = allRows.length === 0; if(tempXlsxFiles.length === 0) elBtnConvert.disabled = true;
+
+  // Finalize UI based on Type
+  lastParsed = { rows: allRows, type: detectedType };
+
+  if (detectedType === 'price') {
+    const sortedDates = Array.from(foundDates).sort(); 
+    const latestDate = sortedDates[sortedDates.length - 1] || null;
+    lastParsed.tradeDateISO = latestDate;
+    elPillDate.textContent = latestDate || "-";
+    elPillRows.textContent = allRows.length.toLocaleString() + " (Harga)";
+    toast(`File Harga Terdeteksi (${allRows.length} baris).`);
+  } else if (detectedType === 'meta') {
+    elPillDate.textContent = "METADATA";
+    elPillRows.textContent = allRows.length.toLocaleString() + " (Info Saham)";
+    toast(`File Info/Sektor Terdeteksi (${allRows.length} baris).`);
+  } else {
+    toast("Format file tidak dikenali.", true);
+  }
+
+  elBtnUpload.disabled = allRows.length === 0; 
+  if(tempXlsxFiles.length === 0) elBtnConvert.disabled = true;
   return allRows.length;
 }
 
+/* --- EVENT HANDLERS --- */
 elFileInput.onchange = async (e) => {
   const files = Array.from(e.target.files || []); if (!files.length) return;
   tempXlsxFiles = files.filter(f => f.name.toLowerCase().endsWith(".xlsx")); const csvFiles = files.filter(f => f.name.toLowerCase().endsWith(".csv"));
   elBtnConvert.disabled = tempXlsxFiles.length === 0; elBtnUpload.disabled = true; elBtnAnalyze.disabled = true; toast("Memeriksa file...");
-  if (tempXlsxFiles.length > 0) toast(`${tempXlsxFiles.length} XLSX, ${csvFiles.length} CSV terdeteksi.`);
-  else { try { const count = await processBatchCsvFiles(csvFiles); toast(`Siap (${count} baris).`); if (count > 0) elBtnAnalyze.disabled = false; } catch(err) { console.error(err); toast("Error baca CSV", true); } }
+  if (tempXlsxFiles.length > 0) toast(`${tempXlsxFiles.length} XLSX, ${csvFiles.length} CSV terdeteksi. Convert dulu.`);
+  else { try { await processBatchFiles(csvFiles); } catch(err) { console.error(err); toast("Error baca CSV", true); } }
 };
 
 elBtnConvert.onclick = async () => {
   if (!tempXlsxFiles.length) return; try { toast(`Konversi ${tempXlsxFiles.length} XLSX...`); const zip = new JSZip(); const convertedCsvBlobs = [];
     for (const file of tempXlsxFiles) { const data = await file.arrayBuffer(); const workbook = XLSX.read(data); const firstSheet = workbook.Sheets[workbook.SheetNames[0]]; const csvOutput = XLSX.utils.sheet_to_csv(firstSheet); const csvName = file.name.replace(/\.xlsx$/i, ".csv"); zip.file(csvName, csvOutput); convertedCsvBlobs.push(new File([csvOutput], csvName, { type: "text/csv" })); }
     const zipContent = await zip.generateAsync({ type: "blob" }); const url = URL.createObjectURL(zipContent); const a = document.createElement("a"); a.href = url; a.download = `Converted_${new Date().toISOString().slice(0,10)}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    const count = await processBatchCsvFiles(convertedCsvBlobs); toast("Konversi sukses."); if(count > 0) elBtnAnalyze.disabled = false; tempXlsxFiles = []; elBtnConvert.disabled = true;
+    await processBatchFiles(convertedCsvBlobs); tempXlsxFiles = []; elBtnConvert.disabled = true;
   } catch (err) { console.error(err); toast("Gagal konversi", true); }
 };
 
 elBtnUpload.onclick = async () => {
-  try { const { rows } = lastParsed; if (!rows.length) return; toast("Upload ke Supabase..."); await upsertSymbols(rows); await upsertPrices(rows); cachedSignals = []; toast("Upload sukses."); await refreshSignals(); } catch(err) { console.error(err); toast("Upload gagal", true); }
+  try { 
+    const { rows, type } = lastParsed; 
+    if (!rows.length) return; 
+    
+    if (type === 'meta') {
+      toast("Update Sektor & Syariah ke DB...");
+      // Upsert Metadata
+      const { error } = await sb.from("symbols").upsert(rows, { onConflict: "symbol" });
+      if (error) throw error;
+      toast("Info Sektor/Syariah Berhasil Diupdate!");
+      await loadMetadata(); // Reload cache
+    } else {
+      toast("Upload Harga ke Supabase..."); 
+      await upsertSymbols(rows); 
+      await upsertPrices(rows); 
+      toast("Upload Harga Sukses.");
+    }
+    
+    // Clear Upload State
+    elBtnUpload.disabled = true;
+    if (type === 'price') await refreshSignals();
+    
+  } catch(err) { console.error(err); toast("Upload gagal: " + err.message, true); }
 };
 
-/* --- ANALYZER (NO CHANGE) --- */
 elBtnAnalyze.onclick = async () => {
   try {
     let targetDate = lastParsed.tradeDateISO; if (!targetDate) targetDate = latestDbDate; if (!targetDate) { toast("No Date", true); return; }
-    let symbols = []; if (lastParsed.rows.length > 0 && lastParsed.tradeDateISO === targetDate) symbols = [...new Set(lastParsed.rows.map(r => r.symbol))]; else { toast("Fetch symbols DB..."); const { data } = await sb.from("prices_daily").select("symbol").eq("trade_date", targetDate); symbols = data.map(s => s.symbol); }
+    let symbols = []; 
+    // Logic: fetch all symbols for date
+    const { data } = await sb.from("prices_daily").select("symbol").eq("trade_date", targetDate); 
+    symbols = data.map(s => s.symbol);
+    
     if (symbols.length === 0) { toast("No symbols", true); return; } toast(`Analisis ${symbols.length} emiten...`);
     const history = await fetchHistoryForSymbols(symbols, targetDate, 160);
     toast("Scoring...");
+    
     const bySym = new Map(); history.forEach(r => { if (!bySym.has(r.symbol)) bySym.set(r.symbol, []); const fNet = (Number(r.foreign_buy) || 0) - (Number(r.foreign_sell) || 0); bySym.get(r.symbol).push({ ...r, foreign_net: fNet }); });
     const out = []; for (const [sym, series] of bySym.entries()) { series.sort((a,b) => a.trade_date.localeCompare(b.trade_date)); if (series[series.length - 1]?.trade_date !== targetDate) continue; const res = scoreSwing(series); const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val; out.push({ trade_date: targetDate, symbol: sym, strategy: "SWING_V1", signal: res.signal, score: res.score, reasons: res.reasons, close: safe(res.metrics.close), rsi14: safe(res.metrics.rsi14), ma20: safe(res.metrics.ma20), ma50: safe(res.metrics.ma50), atr14: safe(res.metrics.atr14), vol_ratio: safe(res.metrics.vol_ratio), foreign_net: safe(res.metrics.foreign_net) }); }
     toast(`Menyimpan ${out.length} sinyal...`); await upsertSignals(out); cachedSignals = []; toast("Selesai."); await refreshSignals();
   } catch(err) { console.error(err); toast("Analisis Error", true); }
 };
 
-/* --- SUPABASE & CALC UTILS (SAME) --- */
+/* --- METADATA CACHE (NEW) --- */
+async function loadMetadata() {
+  const { data, error } = await sb.from("symbols").select("symbol, sector, is_sharia");
+  if (data) {
+    symbolMeta = {};
+    data.forEach(d => { symbolMeta[d.symbol] = d; });
+  }
+}
+
+/* --- RENDER LOGIC UPDATE (Sector & Sharia) --- */
+function parseReasons(r) { if (Array.isArray(r)) return r; if (typeof r === 'string') { try { return JSON.parse(r); } catch { return [r]; } } return []; }
+
+function renderSignals(rows) {
+  const thead = elSignals.querySelector("thead");
+  thead.innerHTML = "<tr>" + COLS.map(c => `<th class="sortable" onclick="setSort('${c.key}');renderSignals(cachedSignals)">${c.label} ${sortBadgeFor(c.key)}</th>`).join("") + "</tr>";
+  
+  const minScore = parseInt(elScoreSlider.value);
+  const filterSig = elFilterSignal.value;
+  const filterCat = elFilterCategory.value; // BARU
+  const searchTerm = elSearch.value.toLowerCase();
+  const watchlist = getWatchlist();
+  const todayISO = new Date().toISOString().slice(0,10);
+
+  let d = rows.filter(r => {
+    // 1. Text Filter
+    if (searchTerm && !r.symbol.toLowerCase().includes(searchTerm)) return false;
+    
+    // 2. Signal Filter
+    if (filterSig === "WATCHLIST") { if (!watchlist[r.symbol]) return false; } 
+    else if (filterSig !== "ALL" && r.signal !== filterSig) return false;
+    
+    // 3. Category Filter (Sharia)
+    const meta = symbolMeta[r.symbol] || { is_sharia: false };
+    if (filterCat === "SHARIA" && !meta.is_sharia) return false;
+    if (filterCat === "NON" && meta.is_sharia) return false;
+
+    // 4. Score Filter
+    if (r.score < minScore) return false;
+    
+    return true;
+  });
+
+  const col = COLS.find(c=>c.key===sortKey) || COLS[3];
+  if(sortDir!==0) d.sort((a,b)=>cmp(a,b,col)*sortDir);
+
+  elSignals.querySelector("tbody").innerHTML = d.map(r => {
+    const reasonsList = parseReasons(r.reasons);
+    const reasonsStr = reasonsList.join(", ");
+    const isWl = !!watchlist[r.symbol];
+    const dateAdded = watchlist[r.symbol];
+    const isNew = isWl && (dateAdded === todayISO || dateAdded === latestDbDate);
+    
+    // Metadata Fetch
+    const meta = symbolMeta[r.symbol] || { sector: "-", is_sharia: false };
+    const shariaBadge = meta.is_sharia ? '<span title="Syariah" style="cursor:help">🕌</span>' : '';
+    const sectorLabel = meta.sector || "-";
+
+    return `
+    <tr>
+      <td style="text-align:center">
+        <button class="star-btn ${isWl?'active':''}" onclick="toggleWatchlist('${r.symbol}')">★</button>
+        ${isNew ? '<span class="new-tag">NEW</span>' : ''}
+      </td>
+      <td class="mono font-bold">
+        ${escapeHtml(r.symbol)} ${shariaBadge}
+      </td>
+      <td><span class="badge ${r.signal.toLowerCase()}">${r.signal}</span></td>
+      <td class="mono ${r.score >= 80 ? 'highlight' : ''}">${fmt(r.score)}</td>
+      <td style="font-size:11px; color:#aaa">${escapeHtml(sectorLabel)}</td>
+      <td class="mono">${fmt(r.close)}</td>
+      <td class="mono">${fmt2(r.rsi14)}</td>
+      <td class="mono">${fmt2(r.ma20)}</td>
+      <td class="mono">${fmt2(r.ma50)}</td>
+      <td class="mono">${fmt2(r.vol_ratio)}</td>
+      <td class="mono">${fmt(r.foreign_net)}</td>
+      <td title="${escapeHtml(reasonsStr)}">${escapeHtml(reasonsStr)}</td>
+    </tr>`;
+  }).join("") || "<tr><td colspan='12' class='dim' style='text-align:center; padding:20px'>Data tidak ditemukan</td></tr>";
+}
+
+elScoreSlider.oninput = (e) => { elScoreVal.textContent = e.target.value; renderSignals(cachedSignals); };
+elSearch.oninput = () => renderSignals(cachedSignals);
+elFilterSignal.onchange = () => renderSignals(cachedSignals);
+elFilterCategory.onchange = () => renderSignals(cachedSignals); // BARU
+
+/* --- SHARED OPS --- */
 async function upsertSymbols(rows) { const unique = new Map(); rows.forEach(r => unique.set(r.symbol, { symbol: r.symbol, name: r.name })); await sb.from("symbols").upsert([...unique.values()], { onConflict: "symbol" }); }
 async function upsertPrices(rows) { const CHUNK = 500; for (let i = 0; i < rows.length; i += CHUNK) { const part = rows.slice(i, i + CHUNK).map(r => ({ trade_date: r.trade_date, symbol: r.symbol, name: r.name, prev: r.prev, open: r.open, high: r.high, low: r.low, close: r.close, chg: r.chg, volume: r.volume, value: r.value, freq: r.freq, foreign_buy: r.foreign_buy || 0, foreign_sell: r.foreign_sell || 0 })); await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" }); } }
 async function upsertSignals(signalRows) { const CHUNK = 500; for (let i = 0; i < signalRows.length; i += CHUNK) { await sb.from("signals_daily").upsert(signalRows.slice(i, i + CHUNK), { onConflict: "trade_date,symbol,strategy" }); } }
@@ -190,81 +340,11 @@ function scoreSwing(series) {
   return { signal:sig, score:Math.max(0,Math.min(100,Math.round(sc))), reasons:rs, metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} };
 }
 
-/* --- RENDER LOGIC UPDATE (Slider & Watchlist) --- */
-function parseReasons(r) {
-  if (Array.isArray(r)) return r; if (typeof r === 'string') { try { return JSON.parse(r); } catch { return [r]; } } return [];
-}
-
-function renderSignals(rows) {
-  const thead = elSignals.querySelector("thead");
-  thead.innerHTML = "<tr>" + COLS.map(c => `<th class="sortable" onclick="setSort('${c.key}');renderSignals(cachedSignals)">${c.label} ${sortBadgeFor(c.key)}</th>`).join("") + "</tr>";
-  
-  // FILTER LOGIC
-  const minScore = parseInt(elScoreSlider.value);
-  const filterSig = elFilterSignal.value;
-  const searchTerm = elSearch.value.toLowerCase();
-  const watchlist = getWatchlist();
-  
-  // Today's Date for "NEW" badge check
-  const todayISO = new Date().toISOString().slice(0,10);
-
-  let d = rows.filter(r => {
-    // 1. Filter Text
-    if (searchTerm && !r.symbol.toLowerCase().includes(searchTerm)) return false;
-    // 2. Filter Signal
-    if (filterSig === "WATCHLIST") {
-      if (!watchlist[r.symbol]) return false;
-    } else if (filterSig !== "ALL" && r.signal !== filterSig) {
-      return false;
-    }
-    // 3. Filter Score Slider
-    if (r.score < minScore) return false;
-    
-    return true;
-  });
-
-  const col = COLS.find(c=>c.key===sortKey) || COLS[3];
-  if(sortDir!==0) d.sort((a,b)=>cmp(a,b,col)*sortDir);
-
-  elSignals.querySelector("tbody").innerHTML = d.map(r => {
-    const reasonsList = parseReasons(r.reasons);
-    const reasonsStr = reasonsList.join(", ");
-    
-    // Watchlist Star State
-    const isWl = !!watchlist[r.symbol];
-    const dateAdded = watchlist[r.symbol];
-    // Badge NEW logic: jika tanggal added == hari ini (atau sama dengan tanggal data yg dianalisa)
-    const isNew = isWl && (dateAdded === todayISO || dateAdded === latestDbDate);
-    
-    return `
-    <tr>
-      <td style="text-align:center">
-        <button class="star-btn ${isWl?'active':''}" onclick="toggleWatchlist('${r.symbol}')">★</button>
-        ${isNew ? '<span class="new-tag">NEW</span>' : ''}
-      </td>
-      <td class="mono font-bold">${escapeHtml(r.symbol)}</td>
-      <td><span class="badge ${r.signal.toLowerCase()}">${r.signal}</span></td>
-      <td class="mono ${r.score >= 80 ? 'highlight' : ''}">${fmt(r.score)}</td>
-      <td class="mono">${fmt(r.close)}</td>
-      <td class="mono">${fmt2(r.rsi14)}</td>
-      <td class="mono">${fmt2(r.ma20)}</td>
-      <td class="mono">${fmt2(r.ma50)}</td>
-      <td class="mono">${fmt2(r.vol_ratio)}</td>
-      <td class="mono">${fmt(r.foreign_net)}</td>
-      <td title="${escapeHtml(reasonsStr)}">${escapeHtml(reasonsStr)}</td>
-    </tr>`;
-  }).join("") || "<tr><td colspan='11' class='dim' style='text-align:center; padding:20px'>Data tidak ditemukan (Cek filter/slider)</td></tr>";
-}
-
-// SLIDER EVENT
-elScoreSlider.oninput = (e) => {
-  elScoreVal.textContent = e.target.value;
-  renderSignals(cachedSignals);
-};
-
-/* --- REFRESH --- */
 async function refreshSignals(){
   try {
+    // 1. Load Metadata First
+    await loadMetadata();
+
     let d = lastParsed.tradeDateISO; 
     if (!d) { latestDbDate = await fetchLatestTradeDate(); d = latestDbDate; }
     if (d) { elBtnAnalyze.disabled = false; latestDbDate = d; }
@@ -272,13 +352,18 @@ async function refreshSignals(){
     elPillDate.textContent = d;
     toast(`Memuat data: ${d}...`);
     cachedSignals = await fetchSignalsLatest(d);
-    if (cachedSignals.length > 0) toast(`Loaded ${cachedSignals.length} rows.`); else toast(`Data ${d} siap dianalisis.`, true);
+    
+    if (cachedSignals.length > 0) {
+      toast(`Ready.`);
+      elPillRows.textContent = cachedSignals.length.toLocaleString() + " Emiten (DB)";
+    } else {
+      toast(`Data ${d} siap dianalisis.`, true);
+      elPillRows.textContent = "0 (Perlu Analisis)";
+    }
+    
     renderSignals(cachedSignals);
   } catch(e) { console.error(e); toast("Error load", true); }
 }
-
-elSearch.oninput = () => renderSignals(cachedSignals);
-elFilterSignal.onchange = () => renderSignals(cachedSignals);
 
 toast("System Ready.");
 refreshSignals();
