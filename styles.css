@@ -86,8 +86,6 @@ body{
 
 .file input{display:none}
 
-}
-
 .panel{
   border:1px solid var(--line);
   background: rgba(255,255,255,.04);
@@ -145,3 +143,13 @@ body{
 }
 
 .panel-full{min-height:420px}
+
+
+/* Sortable table headers */
+.table thead th.sortable{cursor:pointer; user-select:none;}
+.table thead th .sort{
+  margin-left:6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size:11px;
+}
