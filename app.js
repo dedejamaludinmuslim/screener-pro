@@ -87,7 +87,8 @@ function parseIDXDateToISO(s){
 
 function parseCSV(text){
   // auto-detect delimiter ("," vs ";") from the first non-empty line
-  const firstLine = (text.split(/?
+  const firstLine = (text.split(/
+?
 /).find(l => l.trim().length) || "");
   const commaCount = (firstLine.match(/,/g) || []).length;
   const semiCount  = (firstLine.match(/;/g) || []).length;
@@ -109,13 +110,15 @@ function parseCSV(text){
     else if(c==='
 '){
       row.push(field);field="";
-      if(row.length&&typeof row[row.length-1]==="string")row[row.length-1]=row[row.length-1].replace(/$/,"");
+      if(row.length&&typeof row[row.length-1]==="string")row[row.length-1]=row[row.length-1].replace(/
+$/,"");
       if(row.some(v=>v!==""))rows.push(row);
       row=[];
     } else field+=c;
   }
   if(field.length||row.length){
-    row.push(field.replace(/$/,""));
+    row.push(field.replace(/
+$/,""));
     if(row.some(v=>v!==""))rows.push(row);
   }
   return rows;
