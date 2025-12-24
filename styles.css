@@ -1,7 +1,6 @@
 :root{
   --bg: #0b1220;
   --card: rgba(255,255,255,.06);
-  --card2: rgba(255,255,255,.08);
   --line: rgba(255,255,255,.10);
   --text: rgba(255,255,255,.92);
   --dim: rgba(255,255,255,.65);
@@ -55,24 +54,10 @@ body{
 
 .card-title{font-weight:800;margin-bottom:10px}
 
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-@media (max-width:820px){ .grid2{grid-template-columns:1fr} }
-
-.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:6px}
-.field input, .search, .select{
-  width:100%;
-  padding:10px 12px;
-  border-radius:12px;
-  border:1px solid var(--line);
-  background: rgba(0,0,0,.18);
-  color: var(--text);
-  outline:none;
-}
-
 .row{display:flex;align-items:center;gap:10px;margin-top:10px}
 .row.wrap{flex-wrap:wrap}
 .hint{font-size:12px;color:var(--dim)}
-.msg{margin-top:10px;font-size:13px;color:rgba(255,255,255,.8)}
+.hidden{display:none !important}
 
 .btn{
   border:1px solid var(--line);
@@ -88,7 +73,6 @@ body{
 .btn:disabled{opacity:.45;cursor:not-allowed}
 
 .btn.ghost{background: transparent}
-.hidden{display:none !important}
 
 .pill{
   border:1px solid var(--line);
@@ -117,6 +101,15 @@ body{
   padding:12px;
 }
 .panel-title{font-weight:800;margin-bottom:8px}
+
+.search, .select{
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background: rgba(0,0,0,.18);
+  color: var(--text);
+  outline:none;
+}
 
 .table-wrap{overflow:auto;border-radius:14px;border:1px solid var(--line)}
 .table{
