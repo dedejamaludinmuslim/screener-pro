@@ -59,8 +59,7 @@ function int(x){
   return n===null?null:Math.trunc(n);
 }
 
-const MONTH_ID={
-  agt: "08",jan:"01",januari:"01",feb:"02",februari:"02",mar:"03",maret:"03",apr:"04",april:"04",mei:"05",jun:"06",juni:"06",jul:"07",juli:"07",agu:"08",agustus:"08",sep:"09",september:"09",okt:"10",oktober:"10",nov:"11",november:"11",des:"12",desember:"12"};
+const MONTH_ID={jan:"01",januari:"01",feb:"02",februari:"02",mar:"03",maret:"03",apr:"04",april:"04",mei:"05",jun:"06",juni:"06",jul:"07",juli:"07",agu:"08",agustus:"08",sep:"09",september:"09",okt:"10",oktober:"10",nov:"11",november:"11",des:"12",desember:"12"};
 function parseIDXDateToISO(s){
   if(!s)return null;
   const raw=String(s).trim().replace(/\s+/g," ");
@@ -69,23 +68,13 @@ function parseIDXDateToISO(s){
   if(parts.length<3)return null;
   const d=String(parts[0]).padStart(2,"0");
   const monKey=parts[1].toLowerCase();
-  // normalisasi singkatan bulan yang sering beda sumber
-  // contoh: "Agt" (IDX) -> "agu"
-  const monNorm = (monKey === "agt") ? "agu" : monKey;
   const y=parts[2];
-  const m = MONTH_ID[monNorm] || MONTH_ID[monNorm.slice(0,3)] || MONTH_ID[monKey] || MONTH_ID[monKey.slice(0,3)];
+  const m=MONTH_ID[monKey]||MONTH_ID[monKey.slice(0,3)];
   if(!m)return null;
   return `${y}-${m}-${d}`;
 }
 
 function parseCSV(text){
-  // auto-detect delimiter ("," vs ";") from the first non-empty line
-  const firstLine = (text.split(/?
-/).find(l => l.trim().length) || "");
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const semiCount  = (firstLine.match(/;/g) || []).length;
-  const DELIM = semiCount > commaCount ? ";" : ",";
-
   const rows=[];
   let row=[],field="",inQuotes=false;
   for(let i=0;i<text.length;i++){
@@ -98,17 +87,16 @@ function parseCSV(text){
       continue;
     }
     if(c==='"')inQuotes=true;
-    else if(c===DELIM){row.push(field);field="";}
-    else if(c==='
-'){
+    else if(c===','){row.push(field);field="";}
+    else if(c==='\n'){
       row.push(field);field="";
-      if(row.length&&typeof row[row.length-1]==="string")row[row.length-1]=row[row.length-1].replace(/$/,"");
+      if(row.length&&typeof row[row.length-1]==="string")row[row.length-1]=row[row.length-1].replace(/\r$/,"");
       if(row.some(v=>v!==""))rows.push(row);
       row=[];
     } else field+=c;
   }
   if(field.length||row.length){
-    row.push(field.replace(/$/,""));
+    row.push(field.replace(/\r$/,""));
     if(row.some(v=>v!==""))rows.push(row);
   }
   return rows;
@@ -147,10 +135,6 @@ async function readCsvFile(file){
     };
   }).filter(r=>r.trade_date&&r.symbol);
   const tradeDateISO=cleaned[0]?.trade_date||null;
-  if (!cleaned.length){
-    const sampleDate = rawRows[0] ? rawRows[0]["Tanggal Perdagangan Terakhir"] : "";
-    throw new Error(`Data 0 baris setelah parsing. Kemungkinan format tanggal tidak terbaca. Contoh nilai tanggal: "${sampleDate}". Pastikan kolom "Tanggal Perdagangan Terakhir" berformat seperti "14 Agu 2025" / "14 Agt 2025" / "2025-08-14".`);
-  }
   return {tradeDateISO, rows: cleaned};
 }
 
