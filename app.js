@@ -2,7 +2,8 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
-   - FIX: Supports Generated Column for foreign_net
+   - FIX: Supports Generated Column (foreign_net)
+   - FIX: Maps all columns (name, prev, chg, value, freq)
 ========================================================= */
 
 /* =========================
@@ -32,7 +33,7 @@ const elFilterSignal = $("filterSignal");
 let lastParsed = { tradeDateISO: null, rows: [] };
 let cachedSignals = [];
 let cachedSignalsDate = null;
-let tempXlsxFiles = []; // Array of files
+let tempXlsxFiles = []; 
 
 /* =========================
    Sorting & Utils
@@ -160,7 +161,10 @@ async function processBatchCsvFiles(files) {
           high: num(r["Tertinggi"]),
           low: num(r["Terendah"]),
           close: num(r["Penutupan"]),
+          chg: num(r["Selisih"]),
           volume: int(r["Volume"]),
+          value: num(r["Nilai"]),
+          freq: int(r["Frekuensi"]),
           foreign_buy: int(r["Foreign Buy"]),
           foreign_sell: int(r["Foreign Sell"]),
         };
@@ -208,9 +212,7 @@ elFileInput.onchange = async (e) => {
 
   if (tempXlsxFiles.length > 0) {
     toast(`Terdeteksi: ${tempXlsxFiles.length} XLSX, ${csvFiles.length} CSV. Klik 'Convert' untuk memproses.`);
-    // If user mixed files, we disable direct upload until converted
   } else {
-    // Only CSVs
     try {
       toast(`Membaca ${csvFiles.length} file CSV...`);
       const count = await processBatchCsvFiles(csvFiles);
@@ -344,7 +346,7 @@ elBtnAnalyze.onclick = async () => {
 };
 
 /* =========================
-   Supabase Ops (FIXED)
+   Supabase Ops (Complete)
 ========================= */
 async function upsertSymbols(rows) {
   // Use map to unique
@@ -357,18 +359,22 @@ async function upsertSymbols(rows) {
 async function upsertPrices(rows) {
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
-    // FIX: Send foreign_buy & foreign_sell, NOT foreign_net
+    // FIX: Include name, prev, chg, etc. Skip foreign_net.
     const part = rows.slice(i, i + CHUNK).map(r => ({
       trade_date: r.trade_date, 
       symbol: r.symbol,
+      name: r.name,          // Added
+      prev: r.prev,          // Added
       open: r.open, 
       high: r.high, 
       low: r.low, 
       close: r.close,
-      volume: r.volume, 
+      chg: r.chg,            // Added
+      volume: r.volume,
+      value: r.value,        // Added
+      freq: r.freq,          // Added
       foreign_buy: r.foreign_buy || 0,
       foreign_sell: r.foreign_sell || 0
-      // removed foreign_net key
     }));
     const { error } = await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" });
     if (error) throw error;
@@ -391,7 +397,6 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   let all = [];
   const CHUNK = 100; // split symbols
   for(let i=0; i<symbols.length; i+=CHUNK){
-    // Reading foreign_net is fine (calculated on read)
     const { data, error } = await sb.from("prices_daily")
       .select("trade_date,symbol,open,high,low,close,volume,foreign_net")
       .in("symbol", symbols.slice(i, i+CHUNK))
