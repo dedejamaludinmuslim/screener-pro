@@ -3,22 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Swing Signals — XLSX → Supabase</title>
+  <title>Swing Signals — CSV → Supabase</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="./styles.css" />
-
-  <!-- Supabase -->
-  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
-  <!-- XLSX parser (SheetJS) -->
-  <script defer src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"
-  onerror="var s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js'; s.defer=true; document.head.appendChild(s);"></script>
-  <script defer src="./app.js"></script>
-
 </head>
 
 <body>
@@ -28,19 +19,19 @@
         <div class="logo">Σ</div>
         <div>
           <div class="title">Swing Signals</div>
-          <div class="subtitle">Upload .xlsx harian → simpan histori → deteksi sinyal swing</div>
+          <div class="subtitle">Upload CSV harian → simpan histori → deteksi sinyal swing</div>
         </div>
       </div>
       <div class="top-actions"></div>
     </header>
 
     <section id="mainCard" class="card">
-      <div class="card-title">Upload Data Harian (.xlsx)</div>
+      <div class="card-title">Upload Data Harian (.csv)</div>
 
       <div class="row wrap">
         <label class="file">
           <input id="fileInput" type="file" accept=".csv,text/csv" />
-          <span class="btn">Pilih File .xlsx</span>
+          <span class="btn">Pilih File .csv</span>
         </label>
 
         <button id="btnUpload" class="btn" disabled>Upload → Supabase</button>
@@ -97,5 +88,9 @@
       <span class="dim">Upload → Histori → Skor</span>
     </footer>
   </div>
+
+  <!-- Supabase (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
