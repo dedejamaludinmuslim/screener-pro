@@ -22,6 +22,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 
 const elFileInput = $("fileInput");
+const elBtnConvert = $("btnConvert"); // Tombol baru
 const elBtnUpload = $("btnUpload");
 const elBtnAnalyze = $("btnAnalyze");
 
@@ -37,6 +38,7 @@ const elFilterSignal = $("filterSignal");
 let lastParsed = { tradeDateISO: null, rows: [] };
 let cachedSignals = [];
 let cachedSignalsDate = null;
+let tempXlsxFile = null; // Simpan file XLSX sementara
 
 // Sorting (klik header kolom: DESC → ASC → off)
 let sortKey = "score";
@@ -226,49 +228,67 @@ function parseCSV(text) {
   return rows;
 }
 
-async function readCsv(file) {
-  const text = await file.text();
-  const grid = parseCSV(text);
-  if (!grid.length) throw new Error("CSV kosong atau format tidak terbaca.");
+// Logic pemrosesan CSV dipisah agar bisa dipanggil dari upload biasa atau hasil konversi
+async function processCsvFile(file) {
+  try {
+    const text = await file.text();
+    const grid = parseCSV(text);
+    if (!grid.length) throw new Error("CSV kosong atau format tidak terbaca.");
 
-  const header = grid[0].map(h => String(h || "").trim());
-  const dataRows = grid.slice(1);
+    const header = grid[0].map(h => String(h || "").trim());
+    const dataRows = grid.slice(1);
 
-  // build objects
-  const rawRows = dataRows.map(cols => {
-    const obj = {};
-    for (let i = 0; i < header.length; i++) obj[header[i]] = cols[i] ?? "";
-    return obj;
-  });
+    // build objects
+    const rawRows = dataRows.map(cols => {
+      const obj = {};
+      for (let i = 0; i < header.length; i++) obj[header[i]] = cols[i] ?? "";
+      return obj;
+    });
 
-  const cleaned = rawRows
-    .filter(r => r["Kode Saham"])
-    .map(r => {
-      const tradeDateISO = parseIDXDateToISO(r["Tanggal Perdagangan Terakhir"]);
-      return {
-        trade_date: tradeDateISO,
-        symbol: String(r["Kode Saham"]).trim(),
-        name: r["Nama Perusahaan"] ? String(r["Nama Perusahaan"]).trim() : null,
+    const cleaned = rawRows
+      .filter(r => r["Kode Saham"])
+      .map(r => {
+        const tradeDateISO = parseIDXDateToISO(r["Tanggal Perdagangan Terakhir"]);
+        return {
+          trade_date: tradeDateISO,
+          symbol: String(r["Kode Saham"]).trim(),
+          name: r["Nama Perusahaan"] ? String(r["Nama Perusahaan"]).trim() : null,
 
-        prev: num(r["Sebelumnya"]),
-        open: num(r["Open Price"]),
-        high: num(r["Tertinggi"]),
-        low: num(r["Terendah"]),
-        close: num(r["Penutupan"]),
-        chg: num(r["Selisih"]),
+          prev: num(r["Sebelumnya"]),
+          open: num(r["Open Price"]),
+          high: num(r["Tertinggi"]),
+          low: num(r["Terendah"]),
+          close: num(r["Penutupan"]),
+          chg: num(r["Selisih"]),
 
-        volume: int(r["Volume"]),
-        value: num(r["Nilai"]),
-        freq: int(r["Frekuensi"]),
+          volume: int(r["Volume"]),
+          value: num(r["Nilai"]),
+          freq: int(r["Frekuensi"]),
 
-        foreign_buy: int(r["Foreign Buy"]),
-        foreign_sell: int(r["Foreign Sell"]),
-      };
-    })
-    .filter(r => r.trade_date);
+          foreign_buy: int(r["Foreign Buy"]),
+          foreign_sell: int(r["Foreign Sell"]),
+        };
+      })
+      .filter(r => r.trade_date);
 
-  const tradeDateISO = cleaned[0]?.trade_date || null;
-  return { tradeDateISO, rows: cleaned };
+    const tradeDateISO = cleaned[0]?.trade_date || null;
+    
+    lastParsed = { tradeDateISO, rows: cleaned };
+
+    // Update UI
+    elPillDate.textContent = `Trade date: ${tradeDateISO || "-"}`;
+    elPillRows.textContent = `Rows: ${cleaned.length.toLocaleString("id-ID")}`;
+    
+    elBtnUpload.disabled = cleaned.length === 0;
+    elBtnAnalyze.disabled = cleaned.length === 0;
+    
+    // Matikan tombol convert karena sudah jadi CSV
+    elBtnConvert.disabled = true;
+
+    return { tradeDateISO, rows: cleaned };
+  } catch(err) {
+    throw err;
+  }
 }
 
 /* =========================
@@ -575,25 +595,72 @@ async function refreshSignals(){
 }
 
 /* =========================
-   UI events
+   UI events (MODIFIED FOR XLSX)
 ========================= */
 elFileInput.onchange = async (e) => {
   const file = e.target.files?.[0];
-  if (!file) return;
+  if (!file) {
+    elBtnConvert.disabled = true;
+    elBtnUpload.disabled = true;
+    return;
+  }
 
-  try{
+  // Deteksi Format XLSX
+  if (file.name.toLowerCase().endsWith(".xlsx")) {
+    tempXlsxFile = file;
+    elBtnConvert.disabled = false;
+    elBtnUpload.disabled = true;
+    elBtnAnalyze.disabled = true;
+    toast("File XLSX terdeteksi. Klik 'Convert XLSX'.");
+    return;
+  }
+
+  // Jika CSV, proses langsung
+  try {
+    tempXlsxFile = null;
+    elBtnConvert.disabled = true;
     toast("membaca csv…");
-    const parsed = await readCsv(file);
-    lastParsed = parsed;
-
-    elPillDate.textContent = `Trade date: ${parsed.tradeDateISO || "-"}`;
-    elPillRows.textContent = `Rows: ${parsed.rows.length.toLocaleString("id-ID")}`;    elBtnUpload.disabled = parsed.rows.length === 0;
-    elBtnAnalyze.disabled = parsed.rows.length === 0;
-
+    await processCsvFile(file);
     toast("file siap di-upload.");
-  }catch(err){
+  } catch(err) {
     console.error(err);
     toast(`gagal baca csv: ${err.message || err}`, true);
+  }
+};
+
+elBtnConvert.onclick = async () => {
+  if (!tempXlsxFile) return;
+  try {
+    toast("Mengonversi XLSX ke CSV…");
+    
+    // Baca buffer file
+    const data = await tempXlsxFile.arrayBuffer();
+    // Parse menggunakan SheetJS
+    const workbook = XLSX.read(data);
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    // Convert ke CSV string
+    const csvOutput = XLSX.utils.sheet_to_csv(firstSheet);
+    
+    // 1. Download File CSV (Sesuai request)
+    const blob = new Blob([csvOutput], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = tempXlsxFile.name.replace(/\.xlsx$/i, ".csv");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    // 2. Load ke Aplikasi (Auto-load)
+    // Bungkus blob jadi File object agar kompatibel dengan logika lama
+    const newFile = new File([blob], a.download, { type: "text/csv" });
+    await processCsvFile(newFile);
+    
+    toast("Konversi sukses & data siap upload.");
+    tempXlsxFile = null; // reset
+  } catch(err) {
+    console.error(err);
+    toast("Gagal konversi XLSX: " + err.message, true);
   }
 };
 
@@ -677,11 +744,12 @@ elBtnAnalyze.onclick = async () => {
     console.error(err);
     toast(`analisis gagal: ${err.message || err}`, true);
   }
-};elSearch.oninput = () => renderSignals(cachedSignals);
+};
+elSearch.oninput = () => renderSignals(cachedSignals);
 elFilterSignal.onchange = () => renderSignals(cachedSignals);
 
 /* =========================
    Init
 ========================= */
-toast("siap. pilih file .csv untuk mulai.");
+toast("siap. pilih file .csv/.xlsx untuk mulai.");
 refreshSignals();
