@@ -24,19 +24,19 @@ const $ = (id) => document.getElementById(id);
 const elFileInput = $("fileInput");
 const elBtnUpload = $("btnUpload");
 const elBtnAnalyze = $("btnAnalyze");
-const elBtnRefresh = $("btnRefresh");
 
 const elPillStatus = $("pillStatus");
 const elPillDate = $("pillDate");
 const elPillRows = $("pillRows");
 
-const elPreview = $("previewTable");
 const elSignals = $("signalsTable");
 
 const elSearch = $("search");
 const elFilterSignal = $("filterSignal");
 
 let lastParsed = { tradeDateISO: null, rows: [] };
+let cachedSignals = [];
+let cachedSignalsDate = null;
 
 /* =========================
    Utilities
@@ -442,21 +442,6 @@ function scoreSwing(series) {
 /* =========================
    Render
 ========================= */
-function renderPreview(rows) {
-  const cols = ["trade_date","symbol","name","open","high","low","close","volume","foreign_buy","foreign_sell"];
-  elPreview.querySelector("thead").innerHTML =
-    "<tr>" + cols.map(c => `<th>${c}</th>`).join("") + "</tr>";
-
-  const body = rows.slice(0,10).map(r => `
-    <tr>
-      ${cols.map(c => `<td>${fmt(r[c])}</td>`).join("")}
-    </tr>
-  `).join("");
-
-  elPreview.querySelector("tbody").innerHTML =
-    body || "<tr><td colspan='10' class='dim'>Tidak ada data</td></tr>";
-}
-
 function renderSignals(rows) {
   elSignals.querySelector("thead").innerHTML =
     "<tr>" +
@@ -498,18 +483,23 @@ function renderSignals(rows) {
 /* =========================
    Refresh signals
 ========================= */
-async function refreshSignals() {
-  try {
-    let dateISO = lastParsed.tradeDateISO || await fetchLatestTradeDate();
-    if (!dateISO) {
-      toast("belum ada data di Supabase.");
-      return;
-    }
-    elPillDate.textContent = `Trade date: ${dateISO}`;
+async function loadSignalsForDate(dateISO){
+  if(!dateISO) return [];
+  if(cachedSignalsDate===dateISO && cachedSignals.length) return cachedSignals;
+  const signals = await fetchSignalsLatest(dateISO);
+  cachedSignals = signals;
+  cachedSignalsDate = dateISO;
+  return signals;
+}
 
-    const signals = await fetchSignalsLatest(dateISO);
+async function refreshSignals(){
+  try{
+    let dateISO = lastParsed.tradeDateISO || await fetchLatestTradeDate();
+    if(!dateISO){ toast("belum ada data di Supabase."); return; }
+    elPillDate.textContent = `Trade date: ${dateISO}`;
+    const signals = await loadSignalsForDate(dateISO);
     renderSignals(signals);
-  } catch (err) {
+  }catch(err){
     console.error(err);
     toast(`refresh gagal: ${err.message || err}`, true);
   }
@@ -528,10 +518,7 @@ elFileInput.onchange = async (e) => {
     lastParsed = parsed;
 
     elPillDate.textContent = `Trade date: ${parsed.tradeDateISO || "-"}`;
-    elPillRows.textContent = `Rows: ${parsed.rows.length.toLocaleString("id-ID")}`;
-
-    renderPreview(parsed.rows);
-    elBtnUpload.disabled = parsed.rows.length === 0;
+    elPillRows.textContent = `Rows: ${parsed.rows.length.toLocaleString("id-ID")}`;    elBtnUpload.disabled = parsed.rows.length === 0;
     elBtnAnalyze.disabled = parsed.rows.length === 0;
 
     toast("file siap di-upload.");
@@ -552,6 +539,8 @@ elBtnUpload.onclick = async () => {
     toast("upload prices_daily…");
     await upsertPrices(rows);
 
+    cachedSignals = [];
+    cachedSignalsDate = null;
     toast(`upload sukses (${rows.length} baris) • ${tradeDateISO}`);
     await refreshSignals();
   }catch(err){
@@ -611,17 +600,16 @@ elBtnAnalyze.onclick = async () => {
     toast("simpan signals_daily…");
     await upsertSignals(out);
 
+    cachedSignals = [];
+    cachedSignalsDate = null;
     toast(`analisis selesai: ${out.length} simbol`);
     await refreshSignals();
   }catch(err){
     console.error(err);
     toast(`analisis gagal: ${err.message || err}`, true);
   }
-};
-
-elBtnRefresh.onclick = () => refreshSignals();
-elSearch.oninput = () => refreshSignals();
-elFilterSignal.onchange = () => refreshSignals();
+};elSearch.oninput = () => renderSignals(cachedSignals);
+elFilterSignal.onchange = () => renderSignals(cachedSignals);
 
 /* =========================
    Init
