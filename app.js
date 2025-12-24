@@ -2,8 +2,8 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
-   - FIX: Dashboard loads latest ANALYZED date (not just price date)
-   - FIX: Robust rendering for JSONB columns
+   - FIX: Supports Generated Column (foreign_net)
+   - FIX: ADAPTIVE SCORING (Calculates score even without MA50)
 ========================================================= */
 
 /* =========================
@@ -386,25 +386,11 @@ async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   return all;
 }
 
-// FIX: Prioritize latest SIGNAL date, fallback to PRICE date
 async function fetchLatestTradeDate() {
-  // 1. Cek tanggal terbaru yang sudah ada SINYAL
-  const { data: sData } = await sb.from("signals_daily")
-    .select("trade_date")
-    .eq("strategy", "SWING_V1")
-    .order("trade_date", {ascending:false})
-    .limit(1);
+  const { data: sData } = await sb.from("signals_daily").select("trade_date").eq("strategy", "SWING_V1").order("trade_date", {ascending:false}).limit(1);
+  if (sData && sData.length > 0) return sData[0].trade_date;
   
-  if (sData && sData.length > 0) {
-    return sData[0].trade_date; // Gunakan ini agar tabel tidak kosong
-  }
-
-  // 2. Jika belum ada sinyal sama sekali, cek tanggal harga terbaru
-  const { data: pData } = await sb.from("prices_daily")
-    .select("trade_date")
-    .order("trade_date", {ascending:false})
-    .limit(1);
-    
+  const { data: pData } = await sb.from("prices_daily").select("trade_date").order("trade_date", {ascending:false}).limit(1);
   return pData?.[0]?.trade_date;
 }
 
@@ -460,6 +446,10 @@ function ATR(h,l,c,p=14){
   return out;
 }
 
+/* ========================================================
+   ADAPTIVE SCORING LOGIC
+   - Allows scoring even if MA50 is missing
+======================================================== */
 function scoreSwing(series) {
   const i = series.length - 1;
   const last = series[i], prev = series[i-1];
@@ -475,27 +465,51 @@ function scoreSwing(series) {
   const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i];
   const VR = (VM && VM>0) ? V/VM : 0;
   
-  if(!M50 || !R || !A) {
+  // MINIMAL REQUIREMENT: RSI(14) - if less than 14 days, cannot score at all.
+  if(!R || !A) {
     return { 
       signal: "WAIT", 
       score: 0, 
-      reasons: [`Data kurang (Hanya ${series.length} hari, butuh 50).`], 
+      reasons: [`Data terlalu sedikit (${series.length} hari). Butuh min 14 hari.`], 
       metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } 
     };
   }
 
   let sc = 0, rs = [];
-  if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
-  if(M20>M50) { sc+=10; rs.push("MA20>MA50"); }
+
+  // 1. TREND (MA50) - Optional Check
+  if (M50) {
+    if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
+    if(M20 && M20>M50) { sc+=10; rs.push("MA20>MA50"); }
+  } else {
+    // Info note, no score added
+    // rs.push("No MA50 data"); 
+  }
+
+  // 2. MOMENTUM (RSI)
   if(R>=45 && R<=70) { sc+=15; rs.push("RSI Sehat"); }
   else if(R>70) { sc-=8; rs.push("RSI Overbought"); }
-  if(C >= H20*0.995) { sc+=20; rs.push("Near Breakout"); }
+  else if(R<40) { sc-=10; rs.push("RSI Weak"); }
+
+  // 3. BREAKOUT (High 20)
+  if(H20 && C >= H20*0.995) { sc+=20; rs.push("Near Breakout"); }
+
+  // 4. VOLUME
   if(VR >= 1.3) { sc+=15; rs.push(`Vol Kuat (${VR.toFixed(1)}x)`); }
+  else if(VR < 0.8) { sc-=6; }
+
+  // 5. FOREIGN
   if(FNET > 0) { sc+=10; rs.push("Net Buy Asing"); }
-  
+  else if(FNET < 0) { sc-=5; }
+
+  // 6. PRICE ACTION
+  if (prev && C > prev.close) { sc+=3; }
+
   let sig = "WAIT";
   if(sc>=65) sig="BUY"; else if(sc<=30) sig="SELL";
-  if(C<M20 && R<45) { sig="SELL"; rs.unshift("Breakdown MA20"); }
+  
+  // Exit Rule
+  if(M20 && C<M20 && R<45) { sig="SELL"; rs.unshift("Breakdown MA20"); }
 
   return { signal: sig, score: Math.max(0, Math.min(100, Math.round(sc))), reasons: rs, metrics: { close:C, rsi14:R, ma20:M20, ma50:M50, atr14:A, vol_ratio:VR, foreign_net:FNET } };
 }
@@ -506,7 +520,6 @@ function scoreSwing(series) {
 function parseReasons(r) {
   if (Array.isArray(r)) return r;
   if (typeof r === 'string') {
-    // Handle JSON string from DB
     try { return JSON.parse(r); } catch { return [r]; }
   }
   return [];
@@ -521,10 +534,8 @@ function renderSignals(rows) {
   if(sortDir!==0) d.sort((a,b)=>cmp(a,b,col)*sortDir);
 
   elSignals.querySelector("tbody").innerHTML = d.map(r => {
-    // Parsing reasons safely
     const reasonsList = parseReasons(r.reasons);
     const reasonsStr = reasonsList.join(", ");
-    
     return `
     <tr>
       <td class="mono">${escapeHtml(r.symbol)}</td>
@@ -543,31 +554,20 @@ function renderSignals(rows) {
 
 async function refreshSignals(){
   try {
-    // 1. Determine which date to show (Prefer parsed, then latest DB)
     let d = lastParsed.tradeDateISO; 
-    
-    // If no file freshly parsed, fetch from DB
-    if (!d) {
-      d = await fetchLatestTradeDate();
-    }
-
+    if (!d) d = await fetchLatestTradeDate();
     if(!d){ toast("Belum ada data."); return; }
     
     elPillDate.textContent = `Date: ${d}`;
     toast(`Memuat sinyal tanggal: ${d}...`);
-    
     cachedSignals = await fetchSignalsLatest(d);
-    
-    if (cachedSignals.length > 0) {
-      toast(`Berhasil memuat ${cachedSignals.length} baris.`);
-    } else {
-      toast(`Tidak ada sinyal untuk tanggal ${d}. Coba Analisis.`, true);
-    }
+    if (cachedSignals.length > 0) toast(`Berhasil memuat ${cachedSignals.length} baris.`);
+    else toast(`Tidak ada sinyal untuk ${d}. Coba klik 'Analisis Swing'.`, true);
     
     renderSignals(cachedSignals);
   } catch(e) { 
     console.error(e); 
-    toast("Error loading signals: " + e.message, true);
+    toast("Error: " + e.message, true);
   }
 }
 
