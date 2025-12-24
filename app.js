@@ -1,13 +1,19 @@
+/* =========================================================
+   Swing Signals — CSV → Supabase (NO LOGIN, NO WATCHLIST)
+   - Upload CSV ringkasan harian (format IDX)
+   - Simpan histori ke Supabase (prices_daily + symbols)
+   - Analisis swing rule-based (signals_daily)
+========================================================= */
+
 /* =========================
-   CONFIG (NO LOGIN)
+   CONFIG (KEYS EMBEDDED)
 ========================= */
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaGZ3ZGJnb2VqZHV6anZlenJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NjMxNzEsImV4cCI6MjA4MjEzOTE3MX0.JUoaKbT29HMZUhGjUbT4yj9MF0sn4gjzUOs9mKLM-nw";
 
-if (!window.XLSX) {
-  throw new Error("Library XLSX gagal ter-load. Cek koneksi/CDN atau urutan <script> di index.html");
+if (!window.supabase) {
+  throw new Error("Supabase library belum ter-load. Cek script CDN supabase-js di index.html.");
 }
-
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* =========================
@@ -33,7 +39,45 @@ const elFilterSignal = $("filterSignal");
 let lastParsed = { tradeDateISO: null, rows: [] };
 
 /* =========================
-   Date parse (Indonesian "16 Okt 2025")
+   Utilities
+========================= */
+function toast(msg, bad=false){
+  elPillStatus.textContent = `Status: ${msg}`;
+  elPillStatus.style.borderColor = bad ? "rgba(255,120,80,.45)" : "rgba(255,255,255,.10)";
+}
+
+function fmt(x){
+  if (x === null || x === undefined) return "-";
+  if (typeof x === "number") return Number.isFinite(x) ? x.toLocaleString("id-ID") : "-";
+  return String(x);
+}
+function fmt2(x){
+  if (x === null || x === undefined) return "-";
+  const n = Number(x);
+  if (!Number.isFinite(n)) return "-";
+  return n.toFixed(2);
+}
+function escapeHtml(str){
+  return String(str)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+function num(x) {
+  if (x === null || x === undefined || x === "") return null;
+  const n = Number(String(x).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+function int(x) {
+  const n = num(x);
+  return n === null ? null : Math.trunc(n);
+}
+
+/* =========================
+   Date parse (e.g. "08 Des 2025")
 ========================= */
 const MONTH_ID = {
   jan: "01", januari: "01",
@@ -52,13 +96,10 @@ const MONTH_ID = {
 
 function parseIDXDateToISO(s) {
   if (!s) return null;
-  if (Object.prototype.toString.call(s) === "[object Date]" && !isNaN(s)) {
-    const y = s.getFullYear();
-    const m = String(s.getMonth() + 1).padStart(2, "0");
-    const d = String(s.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }
   const raw = String(s).trim().replace(/\s+/g, " ");
+  // Already ISO?
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
   const parts = raw.split(" ");
   if (parts.length < 3) return null;
 
@@ -66,42 +107,84 @@ function parseIDXDateToISO(s) {
   const monKey = parts[1].toLowerCase();
   const y = parts[2];
 
-  const m = MONTH_ID[monKey] || MONTH_ID[monKey.slice(0, 3)];
+  const m = MONTH_ID[monKey] || MONTH_ID[monKey.slice(0,3)];
   if (!m) return null;
+
   return `${y}-${m}-${d}`;
 }
 
 /* =========================
-   Excel parse
+   Robust CSV Parser (no external libs)
+   - Supports quoted fields, commas, CRLF/LF
 ========================= */
-function num(x) {
-  if (x === null || x === undefined || x === "") return null;
-  const n = Number(String(x).replace(/,/g, ""));
-  return Number.isFinite(n) ? n : null;
-}
-function int(x) {
-  const n = num(x);
-  return n === null ? null : Math.trunc(n);
-}
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
 
-async function readCsv(file){
-  if (!window.Papa) throw new Error("PapaParse gagal ter-load.");
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
 
-  const text = await file.text(); // CSV = text, aman tanpa library aneh-aneh
-  const parsed = window.Papa.parse(text, {
-    header: true,
-    skipEmptyLines: true,
-    dynamicTyping: false, // kita handle num/int sendiri
-  });
+    if (inQuotes) {
+      if (c === '"') {
+        // escaped quote?
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+      continue;
+    }
 
-  if (parsed.errors?.length) {
-    // tampilkan 1 error paling atas biar jelas
-    throw new Error(parsed.errors[0].message || "CSV parse error");
+    if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field);
+      field = "";
+    } else if (c === '\n') {
+      row.push(field);
+      field = "";
+      // drop trailing \r from last field if any
+      if (row.length && typeof row[row.length - 1] === "string") {
+        row[row.length - 1] = row[row.length - 1].replace(/\r$/, "");
+      }
+      // skip empty lines
+      if (row.some(v => v !== "")) rows.push(row);
+      row = [];
+    } else {
+      field += c;
+    }
   }
 
-  const rowsRaw = parsed.data || [];
+  // flush last field
+  if (field.length || row.length) {
+    row.push(field.replace(/\r$/, ""));
+    if (row.some(v => v !== "")) rows.push(row);
+  }
+  return rows;
+}
 
-  const cleaned = rowsRaw
+async function readCsv(file) {
+  const text = await file.text();
+  const grid = parseCSV(text);
+  if (!grid.length) throw new Error("CSV kosong atau format tidak terbaca.");
+
+  const header = grid[0].map(h => String(h || "").trim());
+  const dataRows = grid.slice(1);
+
+  // build objects
+  const rawRows = dataRows.map(cols => {
+    const obj = {};
+    for (let i = 0; i < header.length; i++) obj[header[i]] = cols[i] ?? "";
+    return obj;
+  });
+
+  const cleaned = rawRows
     .filter(r => r["Kode Saham"])
     .map(r => {
       const tradeDateISO = parseIDXDateToISO(r["Tanggal Perdagangan Terakhir"]);
@@ -359,30 +442,6 @@ function scoreSwing(series) {
 /* =========================
    Render
 ========================= */
-function fmt(x){
-  if (x === null || x === undefined) return "-";
-  if (typeof x === "number") return Number.isFinite(x) ? x.toLocaleString("id-ID") : "-";
-  return String(x);
-}
-function fmt2(x){
-  if (x === null || x === undefined) return "-";
-  const n = Number(x);
-  if (!Number.isFinite(n)) return "-";
-  return n.toFixed(2);
-}
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
-}
-function toast(msg, bad=false){
-  elPillStatus.textContent = `Status: ${msg}`;
-  elPillStatus.style.borderColor = bad ? "rgba(255,120,80,.45)" : "rgba(255,255,255,.10)";
-}
-
 function renderPreview(rows) {
   const cols = ["trade_date","symbol","name","open","high","low","close","volume","foreign_buy","foreign_sell"];
   elPreview.querySelector("thead").innerHTML =
@@ -464,7 +523,7 @@ elFileInput.onchange = async (e) => {
   if (!file) return;
 
   try{
-    toast("membaca xlsx…");
+    toast("membaca csv…");
     const parsed = await readCsv(file);
     lastParsed = parsed;
 
@@ -478,7 +537,7 @@ elFileInput.onchange = async (e) => {
     toast("file siap di-upload.");
   }catch(err){
     console.error(err);
-    toast(`gagal baca xlsx: ${err.message || err}`, true);
+    toast(`gagal baca csv: ${err.message || err}`, true);
   }
 };
 
@@ -567,5 +626,5 @@ elFilterSignal.onchange = () => refreshSignals();
 /* =========================
    Init
 ========================= */
-toast("siap. pilih file .xlsx untuk mulai.");
+toast("siap. pilih file .csv untuk mulai.");
 refreshSignals();
