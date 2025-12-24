@@ -1,167 +1,126 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-  <title>Screener Signals (Supabase)</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Swing Signals — Upload XLSX → Supabase</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="./styles.css" />
 
+  <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <!-- XLSX parser (SheetJS) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
 </head>
 
 <body>
   <div class="app">
-
-    <!-- TOP BAR -->
     <header class="topbar">
       <div class="brand">
         <div class="logo">Σ</div>
         <div>
-          <div class="title">Screener Signals</div>
-          <div class="subtitle" id="subtitle">Supabase + CSV EOD</div>
+          <div class="title">Swing Signals</div>
+          <div class="subtitle">Upload .xlsx harian → simpan histori → sinyal swing 1–2x/minggu</div>
         </div>
       </div>
 
       <div class="top-actions">
-        <button class="btn ghost" id="btnRefresh">Refresh</button>
-        <button class="btn ghost" id="btnUpload">Upload CSV</button>
-        <button class="btn ghost" id="btnLogout">Logout</button>
+        <button id="btnLogout" class="btn ghost hidden">Logout</button>
       </div>
     </header>
 
-    <!-- LOGIN -->
-    <section class="panel" id="loginPanel">
-      <div class="card">
-        <h2>Login</h2>
-        <p class="muted">Pakai Supabase Auth (email + password).</p>
+    <!-- AUTH -->
+    <section id="authCard" class="card">
+      <div class="card-title">Login</div>
+      <div class="grid2">
+        <div class="field">
+          <label>Email</label>
+          <input id="email" type="email" placeholder="nama@domain.com" autocomplete="username" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnLogin" class="btn">Login</button>
+        <button id="btnRegister" class="btn ghost">Register</button>
+        <div class="hint">Gunakan Supabase Auth (email/password). RLS sudah aktif.</div>
+      </div>
+      <div id="authMsg" class="msg"></div>
+    </section>
 
-        <div class="grid2">
-          <div class="field">
-            <label>Email</label>
-            <input id="email" type="email" placeholder="nama@domain.com" autocomplete="email" />
-          </div>
-          <div class="field">
-            <label>Password</label>
-            <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
+    <!-- UPLOAD -->
+    <section id="mainCard" class="card hidden">
+      <div class="card-title">Upload Data Harian (.xlsx)</div>
+
+      <div class="row wrap">
+        <label class="file">
+          <input id="fileInput" type="file" accept=".xlsx" />
+          <span class="btn">Pilih File .xlsx</span>
+        </label>
+
+        <button id="btnUpload" class="btn" disabled>Upload → Supabase</button>
+        <button id="btnAnalyze" class="btn ghost" disabled>Analisis Swing</button>
+        <button id="btnRefresh" class="btn ghost">Refresh</button>
+      </div>
+
+      <div class="row wrap">
+        <div class="pill" id="pillStatus">Status: menunggu file</div>
+        <div class="pill mono" id="pillDate">Trade date: -</div>
+        <div class="pill mono" id="pillRows">Rows: -</div>
+      </div>
+
+      <div class="split">
+        <div class="panel">
+          <div class="panel-title">Preview (10 baris)</div>
+          <div class="table-wrap">
+            <table class="table" id="previewTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
 
-        <div class="row">
-          <button class="btn primary" id="btnLogin">Login</button>
-          <button class="btn" id="btnSignup">Daftar</button>
-        </div>
+        <div class="panel">
+          <div class="panel-title">Sinyal Swing (Top)</div>
+          <div class="row wrap">
+            <input id="search" class="search" placeholder="Cari simbol / nama…" />
+            <select id="filterSignal" class="select">
+              <option value="ALL">Semua</option>
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+              <option value="WAIT">WAIT</option>
+            </select>
+            <button id="btnOnlyWatchlist" class="btn ghost">Watchlist</button>
+          </div>
 
-        <div class="hint">
-          <div class="pill">Tips:</div>
-          <div class="muted">Buat akun dulu, lalu upload CSV harian. Setelah ada histori beberapa hari, SMA20/50/200 jadi makin akurat.</div>
+          <div class="table-wrap">
+            <table class="table" id="signalsTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="hint">
+            Catatan: sinyal ini bukan “ramalan”, ini cuma scoring rule-based untuk disiplin swing.
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- MAIN -->
-    <main class="panel hidden" id="mainPanel">
-
-      <!-- CONTROLS -->
-      <section class="controls">
-        <div class="tabs" role="tablist">
-          <button class="tab active" data-tab="ALL">SEMUA SINYAL</button>
-          <button class="tab" data-tab="WATCHLIST">WATCHLIST</button>
-          <button class="tab" data-tab="PORTFOLIO">PORTOFOLIO</button>
-        </div>
-
-        <div class="filters">
-          <div class="field">
-            <label>Trading Style</label>
-            <select id="styleSelect">
-              <option value="AGRESIF">Agresif</option>
-              <option value="MODERAT" selected>Moderat</option>
-              <option value="KONSERVATIF">Konservatif</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label>Trade Date</label>
-            <select id="dateSelect"></select>
-          </div>
-
-          <div class="field grow">
-            <label>Search</label>
-            <input id="searchBox" type="text" placeholder="Kode / Nama perusahaan..." />
-          </div>
-        </div>
-      </section>
-
-      <!-- LIST -->
-      <section class="list" id="cards"></section>
-
-      <footer class="footer muted" id="footerNote"></footer>
-    </main>
-
-    <!-- hidden file input -->
-    <input type="file" id="fileInput" accept=".csv,text/csv" class="hidden" />
-
-    <!-- MODAL -->
-    <div class="modal hidden" id="modal">
-      <div class="modal-backdrop" data-close="1"></div>
-      <div class="modal-card">
-        <div class="modal-header">
-          <div>
-            <div class="mono" id="mSymbol">-</div>
-            <div class="muted" id="mName">-</div>
-          </div>
-          <button class="btn ghost" data-close="1">Tutup</button>
-        </div>
-
-        <div class="modal-body">
-          <div class="grid2">
-            <div class="field">
-              <label><input type="checkbox" id="mWatchlist" /> Masuk Watchlist</label>
-            </div>
-            <div class="field">
-              <label><input type="checkbox" id="mOwned" /> Saya Punya (Owned)</label>
-            </div>
-          </div>
-
-          <div class="grid2">
-            <div class="field">
-              <label>Buy Price</label>
-              <input id="mBuyPrice" type="number" step="0.01" placeholder="contoh: 1250" />
-            </div>
-            <div class="field">
-              <label>Shares</label>
-              <input id="mShares" type="number" step="1" placeholder="contoh: 1000" />
-            </div>
-          </div>
-
-          <div class="field">
-            <label>Catatan</label>
-            <input id="mNote" type="text" placeholder="misal: beli karena breakout..." />
-          </div>
-
-          <div class="row">
-            <button class="btn primary" id="btnSaveAsset">Simpan</button>
-            <button class="btn danger" id="btnRemoveAsset">Hapus dari daftar</button>
-          </div>
-
-          <div class="hint">
-            <div class="pill">Portofolio signals:</div>
-            <div class="muted">
-              Setelah kamu isi Buy Price, sistem akan tampilkan aksi: add-on / trailing / scaling out / cut loss / re-entry (berbasis close & highest_since_buy).
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
+    <footer class="footer">
+      <span class="mono">SWING_V1</span>
+      <span>•</span>
+      <span class="dim">Upload → Histori → Skor → Watchlist</span>
+    </footer>
   </div>
 
-  <script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
