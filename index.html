@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Swing Signals — Multi CSV → Supabase</title>
+  <title>Swing Signals — CSV → Supabase</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,57 +16,37 @@
   <div class="app">
     <header class="topbar">
       <div class="brand">
-        <div class="mark">Swing Signals</div>
-        <div class="sub">Multi upload CSV harian → histori Supabase → sinyal swing</div>
-      </div>
-
-      <div class="actions">
-        <label class="file">
-          <input id="fileInput" type="file" accept=".csv,text/csv" multiple />
-          <span class="btn">Pilih CSV (multi)</span>
-        </label>
-        <button id="btnUpload" class="btn" disabled>Upload</button>
-        <button id="btnAnalyze" class="btn primary" disabled>Analisis</button>
-      </div>
-    </header>
-
-    <section class="kpis">
-      <div class="kpi">
-        <div class="kpi-label">Trade Date</div>
-        <div class="kpi-value mono" id="kpiDate">-</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Mode</div>
-        <div class="kpi-value">
-          <select id="mode" class="select">
-            <option value="SWING_V1_AGGR">Aggressive</option>
-            <option value="SWING_V1_CONS">Conservative</option>
-          </select>
+        <div class="logo">Σ</div>
+        <div>
+          <div class="title">Swing Signals</div>
+          <div class="subtitle">Upload CSV harian → simpan histori → deteksi sinyal swing</div>
         </div>
       </div>
-      <div class="kpi">
-        <div class="kpi-label">BUY</div>
-        <div class="kpi-value mono" id="kpiBuy">0</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">SELL</div>
-        <div class="kpi-value mono" id="kpiSell">0</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">WAIT</div>
-        <div class="kpi-value mono" id="kpiWait">0</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Rows (file)</div>
-        <div class="kpi-value mono" id="kpiRows">-</div>
-      </div>
-    </section>
+      <div class="top-actions"></div>
+    </header>
 
-    <section class="card">
-      <div class="toolbar">
-        <div class="status" id="pillStatus">Status: siap.</div>
+    <section id="mainCard" class="card">
+      <div class="card-title">Upload Data Harian (.csv)</div>
 
-        <div class="filters">
+      <div class="row wrap">
+        <label class="file">
+          <input id="fileInput" type="file" accept=".csv,text/csv" />
+          <span class="btn">Pilih File .csv</span>
+        </label>
+
+        <button id="btnUpload" class="btn" disabled>Upload → Supabase</button>
+        <button id="btnAnalyze" class="btn ghost" disabled>Analisis Swing</button>
+        </div>
+
+      <div class="row wrap">
+        <div class="pill" id="pillStatus">Status: menunggu file</div>
+        <div class="pill mono" id="pillDate">Trade date: -</div>
+        <div class="pill mono" id="pillRows">Rows: -</div>
+      </div>
+
+      <div class="panel panel-full">
+        <div class="panel-title">Sinyal Swing (Top)</div>
+        <div class="row wrap">
           <input id="search" class="search" placeholder="Cari simbol…" />
           <select id="filterSignal" class="select">
             <option value="ALL">Semua</option>
@@ -75,27 +55,28 @@
             <option value="WAIT">WAIT</option>
           </select>
         </div>
-      </div>
 
-      <div class="table-wrap">
-        <table class="table" id="signalsTable">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+        <div class="table-wrap">
+          <table class="table" id="signalsTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
 
-      <div class="hint">
-        Klik judul kolom untuk sort (ASC/DESC). Sinyal adalah rule-based scoring untuk disiplin swing, bukan ramalan.
+        <div class="hint">
+          Sinyal = rule-based scoring untuk disiplin swing, bukan ramalan.
+        </div>
       </div>
     </section>
 
     <footer class="footer">
       <span class="mono">SWING_V1</span>
       <span>•</span>
-      <span class="dim">CSV → Supabase → Signals</span>
+      <span class="dim">Upload → Histori → Skor</span>
     </footer>
   </div>
 
+  <!-- Supabase (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>
 </body>
