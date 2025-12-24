@@ -35,6 +35,17 @@ function setStatus(msg,bad=false){
   elStatus.textContent=`Status: ${msg}`;
   elStatus.style.borderColor=bad?"rgba(255,120,80,.45)":"rgba(255,255,255,.10)";
 }
+
+function sbErr(e){
+  if(!e) return "unknown";
+  const parts = [];
+  if (e.code) parts.push(`code=${e.code}`);
+  if (e.message) parts.push(`msg=${e.message}`);
+  if (e.details) parts.push(`details=${e.details}`);
+  if (e.hint) parts.push(`hint=${e.hint}`);
+  return parts.join(" | ") || String(e);
+}
+
 function fmt(x){
   if(x===null||x===undefined)return "-";
   if(typeof x==="number")return Number.isFinite(x)?x.toLocaleString("id-ID"):"-";
@@ -75,6 +86,13 @@ function parseIDXDateToISO(s){
 }
 
 function parseCSV(text){
+  // auto-detect delimiter ("," vs ";") from the first non-empty line
+  const firstLine = (text.split(/?
+/).find(l => l.trim().length) || "");
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount  = (firstLine.match(/;/g) || []).length;
+  const DELIM = semiCount > commaCount ? ";" : ",";
+
   const rows=[];
   let row=[],field="",inQuotes=false;
   for(let i=0;i<text.length;i++){
@@ -87,16 +105,17 @@ function parseCSV(text){
       continue;
     }
     if(c==='"')inQuotes=true;
-    else if(c===','){row.push(field);field="";}
-    else if(c==='\n'){
+    else if(c===DELIM){row.push(field);field="";}
+    else if(c==='
+'){
       row.push(field);field="";
-      if(row.length&&typeof row[row.length-1]==="string")row[row.length-1]=row[row.length-1].replace(/\r$/,"");
+      if(row.length&&typeof row[row.length-1]==="string")row[row.length-1]=row[row.length-1].replace(/$/,"");
       if(row.some(v=>v!==""))rows.push(row);
       row=[];
     } else field+=c;
   }
   if(field.length||row.length){
-    row.push(field.replace(/\r$/,""));
+    row.push(field.replace(/$/,""));
     if(row.some(v=>v!==""))rows.push(row);
   }
   return rows;
@@ -141,14 +160,14 @@ async function readCsvFile(file){
 async function upsertSymbols(rows){
   const payload=rows.map(r=>({symbol:r.symbol,name:r.name}));
   const {error}=await sb.from("symbols").upsert(payload,{onConflict:"symbol"});
-  if(error)throw error;
+  if(error) throw new Error("upsert symbols gagal: " + sbErr(error));
 }
 async function upsertPrices(rows){
   const CHUNK=800;
   for(let i=0;i<rows.length;i+=CHUNK){
     const part=rows.slice(i,i+CHUNK);
     const {error}=await sb.from("prices_daily").upsert(part,{onConflict:"trade_date,symbol"});
-    if(error)throw error;
+    if(error) throw new Error("upsert prices_daily gagal: " + sbErr(error));
   }
 }
 async function fetchHistoryForSymbols(symbols,endDateISO,lookbackDays=160){
@@ -174,7 +193,7 @@ async function upsertSignals(signalRows){
   for(let i=0;i<signalRows.length;i+=CHUNK){
     const part=signalRows.slice(i,i+CHUNK);
     const {error}=await sb.from("signals_daily").upsert(part,{onConflict:"trade_date,symbol,strategy"});
-    if(error)throw error;
+    if(error) throw new Error("upsert signals_daily gagal: " + sbErr(error));
   }
 }
 async function fetchSignals(tradeDateISO,strategy){
@@ -486,7 +505,7 @@ elBtnUpload.onclick=async()=>{
     elBtnAnalyze.disabled=!newestDate;
     await refreshSignals();
   }catch(err){
-    console.error(err);
+    console.error("UPLOAD_ERROR_OBJ:", err);
     setStatus(`upload gagal: ${err.message||err}`,true);
   }
 };
@@ -543,7 +562,7 @@ elBtnAnalyze.onclick=async()=>{
     setStatus(`analisis selesai: ${Math.round(out.length/2)} simbol (2 mode)`);
     await refreshSignals();
   }catch(err){
-    console.error(err);
+    console.error("ANALYZE_ERROR_OBJ:", err);
     setStatus(`analisis gagal: ${err.message||err}`,true);
   }
 };
