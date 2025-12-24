@@ -32,11 +32,31 @@ const elPillRows = $("pillRows");
 const elSignals = $("signalsTable");
 
 const elSearch = $("search");
+const elMode = $("mode");
 const elFilterSignal = $("filterSignal");
 
 let lastParsed = { tradeDateISO: null, rows: [] };
 let cachedSignals = [];
 let cachedSignalsDate = null;
+    cachedSignalsStrategy = null;
+let cachedSignalsStrategy = null;
+
+// sorting
+let sortKey = "score";
+let sortDir = -1; // -1 desc, 1 asc, 0 none
+
+const COLS = [
+  { key: "symbol", label: "Symbol", type: "text" },
+  { key: "signal", label: "Signal", type: "text" },
+  { key: "score", label: "Score", type: "num" },
+  { key: "close", label: "Close", type: "num" },
+  { key: "rsi14", label: "RSI14", type: "num" },
+  { key: "ma20", label: "MA20", type: "num" },
+  { key: "ma50", label: "MA50", type: "num" },
+  { key: "vol_ratio", label: "VolR", type: "num" },
+  { key: "foreign_net", label: "FNet", type: "num" },
+  { key: "reasons", label: "Reasons", type: "text" },
+];
 
 /* =========================
    Utilities
@@ -266,12 +286,12 @@ async function upsertSignals(signalRows) {
   }
 }
 
-async function fetchSignalsLatest(tradeDateISO) {
+async function fetchSignalsLatest(tradeDateISO, strategy) {
   const { data, error } = await sb
     .from("signals_daily")
-    .select("trade_date,symbol,signal,score,reasons,close,rsi14,ma20,ma50,atr14,vol_ratio,foreign_net")
+    .select("trade_date,symbol,signal,score,reasons,close,rsi14,ma20,ma50,atr14,vol_ratio,foreign_net,strategy")
     .eq("trade_date", tradeDateISO)
-    .eq("strategy", "SWING_V1")
+    .eq("strategy", strategy)
     .order("score", { ascending: false })
     .limit(5000);
   if (error) throw error;
@@ -361,9 +381,16 @@ function rollingMax(values, period) {
 }
 
 /* =========================
-   Swing scoring rules (SWING_V1)
+   Swing scoring rules (2 mode)
+   - SWING_V1_CONS: lebih ketat
+   - SWING_V1_AGGR: lebih longgar
 ========================= */
-function scoreSwing(series) {
+const MODE_PARAMS = {
+  SWING_V1_CONS: { buyScore: 75, sellScore: 25, breakoutTol: 1.00, volStrong: 1.6, volWeak: 0.85, rsiMin: 50, rsiMax: 68 },
+  SWING_V1_AGGR: { buyScore: 65, sellScore: 30, breakoutTol: 0.995, volStrong: 1.3, volWeak: 0.80, rsiMin: 45, rsiMax: 70 },
+};
+
+function scoreSwing(series, params) {
   const closes = series.map(x => x.close ?? 0);
   const highs = series.map(x => x.high ?? 0);
   const lows  = series.map(x => x.low ?? 0);
@@ -405,14 +432,14 @@ function scoreSwing(series) {
   if (C > MA50) { score += 15; reasons.push("Close > MA50 (uptrend)."); }
   if (MA20 > MA50) { score += 10; reasons.push("MA20 > MA50 (trend menguat)."); }
 
-  if (RSI14 >= 45 && RSI14 <= 70) { score += 15; reasons.push("RSI 45–70 (momentum sehat)."); }
+  if (RSI14 >= params.rsiMin && RSI14 <= params.rsiMax) { score += 15; reasons.push(`RSI ${params.rsiMin}–${params.rsiMax} (momentum sehat).`); }
   if (RSI14 > 70) { score -= 8; reasons.push("RSI > 70 (jenuh beli)."); }
   if (RSI14 < 40) { score -= 10; reasons.push("RSI < 40 (lemah)."); }
 
-  if (C >= HH20 * 0.995) { score += 20; reasons.push("Dekat/tembus high 20 hari (breakout)."); }
+  if (C >= HH20 * params.breakoutTol) { score += 20; reasons.push("Dekat/tembus high 20 hari (breakout)."); }
 
-  if (VOLR >= 1.3) { score += 15; reasons.push(`Volume kuat (${VOLR.toFixed(2)}x MA20).`); }
-  else if (VOLR < 0.8) { score -= 6; reasons.push(`Volume lemah (${VOLR.toFixed(2)}x MA20).`); }
+  if (VOLR >= params.volStrong) { score += 15; reasons.push(`Volume kuat (${VOLR.toFixed(2)}x MA20).`); }
+  else if (VOLR < params.volWeak) { score -= 6; reasons.push(`Volume lemah (${VOLR.toFixed(2)}x MA20).`); }
 
   if (FNET > 0) { score += 10; reasons.push("Foreign net buy (+)."); }
   if (FNET < 0) { score -= 6; reasons.push("Foreign net sell (-)."); }
@@ -421,8 +448,8 @@ function scoreSwing(series) {
   if (prev && prev.close && C > prev.close) { score += 2; reasons.push("Close naik vs kemarin."); }
 
   let signal = "WAIT";
-  if (score >= 65) signal = "BUY";
-  else if (score <= 30) signal = "SELL";
+  if (score >= params.buyScore) signal = "BUY";
+  else if (score <= params.sellScore) signal = "SELL";
 
   if (C < MA20 && RSI14 < 45) {
     signal = "SELL";
@@ -442,29 +469,69 @@ function scoreSwing(series) {
 /* =========================
    Render
 ========================= */
+function sortBadgeFor(key){
+  if (sortKey !== key) return "";
+  if (sortDir === 1) return "▲";
+  if (sortDir === -1) return "▼";
+  return "";
+}
+function setSort(key){
+  if (sortKey !== key){ sortKey = key; sortDir = -1; return; }
+  if (sortDir === -1) sortDir = 1;
+  else if (sortDir === 1) sortDir = 0;
+  else sortDir = -1;
+}
+function comparator(a, b, col){
+  const av = a[col.key];
+  const bv = b[col.key];
+  if (col.key === "reasons"){
+    const as = Array.isArray(av) ? av.join(" | ") : (av ?? "");
+    const bs = Array.isArray(bv) ? bv.join(" | ") : (bv ?? "");
+    return as.localeCompare(bs);
+  }
+  if (col.type === "num"){
+    const an = (av === null || av === undefined) ? null : Number(av);
+    const bn = (bv === null || bv === undefined) ? null : Number(bv);
+    if (an === null && bn === null) return 0;
+    if (an === null) return 1;
+    if (bn === null) return -1;
+    return an - bn;
+  }
+  return String(av ?? "").localeCompare(String(bv ?? ""));
+}
+
 function renderSignals(rows) {
-  elSignals.querySelector("thead").innerHTML =
-    "<tr>" +
-      "<th>Symbol</th><th>Signal</th><th>Score</th><th>Close</th><th>RSI14</th><th>MA20</th><th>MA50</th><th>VolR</th><th>FNet</th><th>Reasons</th>" +
-    "</tr>";
+  const thead = elSignals.querySelector("thead");
+  const tbody = elSignals.querySelector("tbody");
+
+  thead.innerHTML =
+    "<tr>" + COLS.map(c => `<th data-key="${c.key}">${c.label}<span class="sort">${sortBadgeFor(c.key)}</span></th>`).join("") + "</tr>";
+
+  for (const th of thead.querySelectorAll("th")) {
+    th.onclick = () => { setSort(th.dataset.key); renderSignals(cachedSignals); };
+  }
 
   const q = (elSearch.value || "").trim().toLowerCase();
   const f = elFilterSignal.value;
 
-  const filtered = rows.filter(r => {
+  let filtered = rows.filter(r => {
     if (f !== "ALL" && r.signal !== f) return false;
     if (q && !String(r.symbol).toLowerCase().includes(q)) return false;
     return true;
   });
+
+  const col = COLS.find(c => c.key === sortKey) || COLS[2];
+  if (sortDir !== 0) filtered = filtered.slice().sort((a,b) => comparator(a,b,col) * sortDir);
+  else filtered = filtered.slice().sort((a,b) => (Number(b.score||0) - Number(a.score||0)));
 
   const body = filtered.map(r => {
     const badgeClass = r.signal === "BUY" ? "buy" : r.signal === "SELL" ? "sell" : "wait";
     const reasons = Array.isArray(r.reasons) ? r.reasons.slice(0,3).join(" • ") : "";
     return `
       <tr>
-        <td class="mono">${r.symbol}</td>
-        <td><span class="badge ${badgeClass}">${r.signal}</span></td>
-        <td class="mono">${r.score}</td>
+        <td class="mono">${escapeHtml(r.symbol)}</td>
+        <td><span class="badge ${badgeClass}">${escapeHtml(r.signal)}</span></td>
+        <td class="mono">${fmt(r.score)}</td>
         <td class="mono">${fmt(r.close)}</td>
         <td class="mono">${fmt2(r.rsi14)}</td>
         <td class="mono">${fmt2(r.ma20)}</td>
@@ -476,19 +543,19 @@ function renderSignals(rows) {
     `;
   }).join("");
 
-  elSignals.querySelector("tbody").innerHTML =
-    body || "<tr><td colspan='10' class='dim'>Belum ada sinyal. Klik Analisis.</td></tr>";
+  tbody.innerHTML = body || "<tr><td colspan='10' class='dim'>Belum ada sinyal. Klik Analisis.</td></tr>";
 }
 
 /* =========================
    Refresh signals
 ========================= */
-async function loadSignalsForDate(dateISO){
+async function loadSignalsForDate(dateISO, strategy){
   if(!dateISO) return [];
-  if(cachedSignalsDate===dateISO && cachedSignals.length) return cachedSignals;
-  const signals = await fetchSignalsLatest(dateISO);
+  if(cachedSignalsDate===dateISO && cachedSignalsStrategy===strategy && cachedSignals.length) return cachedSignals;
+  const signals = await fetchSignalsLatest(dateISO, strategy);
   cachedSignals = signals;
   cachedSignalsDate = dateISO;
+  cachedSignalsStrategy = strategy;
   return signals;
 }
 
@@ -497,7 +564,8 @@ async function refreshSignals(){
     let dateISO = lastParsed.tradeDateISO || await fetchLatestTradeDate();
     if(!dateISO){ toast("belum ada data di Supabase."); return; }
     elPillDate.textContent = `Trade date: ${dateISO}`;
-    const signals = await loadSignalsForDate(dateISO);
+    const strategy = (elMode?.value || "SWING_V1_CONS");
+    const signals = await loadSignalsForDate(dateISO, strategy);
     renderSignals(signals);
   }catch(err){
     console.error(err);
@@ -541,6 +609,7 @@ elBtnUpload.onclick = async () => {
 
     cachedSignals = [];
     cachedSignalsDate = null;
+    cachedSignalsStrategy = null;
     toast(`upload sukses (${rows.length} baris) • ${tradeDateISO}`);
     await refreshSignals();
   }catch(err){
@@ -578,11 +647,12 @@ elBtnAnalyze.onclick = async () => {
       series.sort((a,b) => a.trade_date.localeCompare(b.trade_date));
       if (series[series.length - 1]?.trade_date !== tradeDateISO) continue;
 
-      const res = scoreSwing(series);
+      for (const strategy of ["SWING_V1_CONS","SWING_V1_AGGR"]) {
+      const res = scoreSwing(series, MODE_PARAMS[strategy]);
       out.push({
         trade_date: tradeDateISO,
         symbol: sym,
-        strategy: "SWING_V1",
+        strategy,
         signal: res.signal,
         score: res.score,
         reasons: res.reasons,
@@ -596,12 +666,14 @@ elBtnAnalyze.onclick = async () => {
         foreign_net: res.metrics.foreign_net ?? null,
       });
     }
+    }
 
     toast("simpan signals_daily…");
     await upsertSignals(out);
 
     cachedSignals = [];
     cachedSignalsDate = null;
+    cachedSignalsStrategy = null;
     toast(`analisis selesai: ${out.length} simbol`);
     await refreshSignals();
   }catch(err){
@@ -610,6 +682,7 @@ elBtnAnalyze.onclick = async () => {
   }
 };elSearch.oninput = () => renderSignals(cachedSignals);
 elFilterSignal.onchange = () => renderSignals(cachedSignals);
+if (elMode) elMode.onchange = () => { cachedSignals = []; cachedSignalsDate = null; cachedSignalsStrategy = null; refreshSignals(); };
 
 /* =========================
    Init
