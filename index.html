@@ -37,19 +37,21 @@
         </div>
       </div>
 
-      <div class="control-group">
+      <div class="control-area">
         <div id="adminControls" class="admin-buttons" style="display:none;">
           <label class="btn-primary-upload">
             <input id="fileInput" type="file" multiple accept=".csv,.xlsx" />
-            <span>📂 Upload Data</span>
+            <span>📂 Upload</span>
           </label>
-          <button id="btnConvert" class="btn-ghost" disabled>Convert & Zip</button>
+          <button id="btnConvert" class="btn-ghost" disabled>Convert</button>
           <button id="btnUpload" class="btn-ghost" disabled>Push DB</button>
           <button id="btnAnalyze" class="btn-action" disabled>⚡ Analisis</button>
         </div>
 
-        <button id="btnLogin" class="btn-ghost" style="width:100%; border:1px solid var(--border); margin-top:auto;">🔒 Login Admin</button>
-        <button id="btnLogout" class="btn-ghost" style="display:none; width:100%; color:var(--sell); border:1px solid var(--sell); margin-top:auto;">Log Out</button>
+        <div class="auth-buttons">
+          <button id="btnLogin" class="btn-ghost btn-login">🔒 Login Admin</button>
+          <button id="btnLogout" class="btn-ghost btn-logout" style="display:none;">Log Out</button>
+        </div>
       </div>
     </aside>
 
@@ -65,10 +67,10 @@
         <div class="tool-section center">
           <div class="filter-group">
             <select id="filterSignal">
-              <option value="ALL">Signal: Semua</option>
-              <option value="BUY">Signal: BUY</option>
-              <option value="SELL">Signal: SELL</option>
-              <option value="WAIT">Signal: WAIT</option>
+              <option value="ALL">Sinyal: Semua</option>
+              <option value="BUY">Sinyal: BUY</option>
+              <option value="SELL">Sinyal: SELL</option>
+              <option value="WAIT">Sinyal: WAIT</option>
               <option value="WATCHLIST">★ Watchlist</option>
             </select>
             <select id="filterCategory">
@@ -98,12 +100,12 @@
 
   <div id="loginModal" class="modal-overlay" style="display:none;">
     <div class="modal-content">
-      <h3 style="margin-top:0; margin-bottom:16px;">Login Admin</h3>
+      <h3>Login Admin</h3>
       <input type="text" id="username" placeholder="Username" class="modal-input">
       <input type="password" id="password" placeholder="Password" class="modal-input">
-      <div style="display:flex; gap:10px; margin-top:20px;">
-        <button id="btnSubmitLogin" class="btn-action" style="flex:1">Masuk</button>
-        <button id="btnCloseLogin" class="btn-ghost" style="flex:1">Batal</button>
+      <div class="modal-actions">
+        <button id="btnSubmitLogin" class="btn-action">Masuk</button>
+        <button id="btnCloseLogin" class="btn-ghost">Batal</button>
       </div>
     </div>
   </div>
