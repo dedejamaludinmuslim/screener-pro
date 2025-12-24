@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Swing Signals — Upload XLSX → Supabase</title>
+  <title>Swing Signals — XLSX → Supabase</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,8 +13,7 @@
 
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- XLSX parser (SheetJS) -->
+  <!-- XLSX parser -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
 </head>
 
@@ -25,38 +24,13 @@
         <div class="logo">Σ</div>
         <div>
           <div class="title">Swing Signals</div>
-          <div class="subtitle">Upload .xlsx harian → simpan histori → sinyal swing 1–2x/minggu</div>
+          <div class="subtitle">Upload .xlsx harian → simpan histori → deteksi sinyal swing</div>
         </div>
       </div>
-
-      <div class="top-actions">
-        <button id="btnLogout" class="btn ghost hidden">Logout</button>
-      </div>
+      <div class="top-actions"></div>
     </header>
 
-    <!-- AUTH -->
-    <section id="authCard" class="card">
-      <div class="card-title">Login</div>
-      <div class="grid2">
-        <div class="field">
-          <label>Email</label>
-          <input id="email" type="email" placeholder="nama@domain.com" autocomplete="username" />
-        </div>
-        <div class="field">
-          <label>Password</label>
-          <input id="password" type="password" placeholder="••••••••" autocomplete="current-password" />
-        </div>
-      </div>
-      <div class="row">
-        <button id="btnLogin" class="btn">Login</button>
-        <button id="btnRegister" class="btn ghost">Register</button>
-        <div class="hint">Gunakan Supabase Auth (email/password). RLS sudah aktif.</div>
-      </div>
-      <div id="authMsg" class="msg"></div>
-    </section>
-
-    <!-- UPLOAD -->
-    <section id="mainCard" class="card hidden">
+    <section id="mainCard" class="card">
       <div class="card-title">Upload Data Harian (.xlsx)</div>
 
       <div class="row wrap">
@@ -90,14 +64,13 @@
         <div class="panel">
           <div class="panel-title">Sinyal Swing (Top)</div>
           <div class="row wrap">
-            <input id="search" class="search" placeholder="Cari simbol / nama…" />
+            <input id="search" class="search" placeholder="Cari simbol…" />
             <select id="filterSignal" class="select">
               <option value="ALL">Semua</option>
               <option value="BUY">BUY</option>
               <option value="SELL">SELL</option>
               <option value="WAIT">WAIT</option>
             </select>
-            <button id="btnOnlyWatchlist" class="btn ghost">Watchlist</button>
           </div>
 
           <div class="table-wrap">
@@ -108,7 +81,7 @@
           </div>
 
           <div class="hint">
-            Catatan: sinyal ini bukan “ramalan”, ini cuma scoring rule-based untuk disiplin swing.
+            Sinyal = rule-based scoring untuk disiplin swing, bukan ramalan.
           </div>
         </div>
       </div>
@@ -117,7 +90,7 @@
     <footer class="footer">
       <span class="mono">SWING_V1</span>
       <span>•</span>
-      <span class="dim">Upload → Histori → Skor → Watchlist</span>
+      <span class="dim">Upload → Histori → Skor</span>
     </footer>
   </div>
 
