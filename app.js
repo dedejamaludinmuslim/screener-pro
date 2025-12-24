@@ -2,8 +2,8 @@
    Swing Signals — CSV → Supabase
    - Batch Upload Support (CSV/XLSX)
    - Auto Zip Download for converted XLSX
-   - FIX: Analisis Ulang tanpa perlu Upload File
-   - FIX: Mengambil semua simbol dari DB saat analisis
+   - FIX: API LIMIT HANDLING (Fetch history in small chunks)
+   - FIX: ADAPTIVE SCORING (Calculate partial score if data missing)
 ========================================================= */
 
 /* =========================
@@ -34,7 +34,7 @@ let lastParsed = { tradeDateISO: null, rows: [] };
 let cachedSignals = [];
 let cachedSignalsDate = null;
 let tempXlsxFiles = []; 
-let latestDbDate = null; // Menyimpan tanggal terakhir dari DB
+let latestDbDate = null; 
 
 /* =========================
    Sorting & Utils
@@ -184,7 +184,6 @@ async function processBatchCsvFiles(files) {
   elPillRows.textContent = `Total Rows: ${allRows.length.toLocaleString("id-ID")}`;
   
   elBtnUpload.disabled = allRows.length === 0;
-  // Enable analyze button if we have uploadable data OR if DB has data (handled in refreshSignals)
   if(tempXlsxFiles.length === 0) elBtnConvert.disabled = true;
 
   return allRows.length;
@@ -212,7 +211,6 @@ elFileInput.onchange = async (e) => {
       toast(`Membaca ${csvFiles.length} file CSV...`);
       const count = await processBatchCsvFiles(csvFiles);
       toast(`Siap upload (${count} baris data).`);
-      // Enable analyze if we have parsed data
       if (count > 0) elBtnAnalyze.disabled = false;
     } catch(err) {
       console.error(err);
@@ -269,7 +267,6 @@ elBtnUpload.onclick = async () => {
 
     cachedSignals = []; 
     toast(`Upload sukses (${rows.length} baris).`);
-    // After upload, update latestDbDate and refresh
     await refreshSignals();
   } catch(err) {
     console.error(err);
@@ -279,18 +276,14 @@ elBtnUpload.onclick = async () => {
 
 elBtnAnalyze.onclick = async () => {
   try {
-    // 1. Determine Target Date: From upload OR from latest DB
     let targetDate = lastParsed.tradeDateISO;
-    if (!targetDate) {
-       targetDate = latestDbDate; // Use DB date if no file uploaded
-    }
+    if (!targetDate) targetDate = latestDbDate;
     
     if (!targetDate) {
       toast("Tidak ada tanggal untuk dianalisis.", true);
       return;
     }
     
-    // 2. Determine Symbols: From upload OR fetch all from DB for that date
     let symbols = [];
     if (lastParsed.rows.length > 0 && lastParsed.tradeDateISO === targetDate) {
        symbols = [...new Set(lastParsed.rows.map(r => r.symbol))];
@@ -308,9 +301,16 @@ elBtnAnalyze.onclick = async () => {
       return;
     }
 
-    toast(`Analisis ${symbols.length} saham per: ${targetDate} (Lookback 160 hari)`);
+    // FIX: Batch processing in UI to calculate percentage
+    toast(`Analisis ${symbols.length} saham (Lookback 160 hari). Mohon tunggu...`);
+    
+    // Fetch History & Score in larger batches to save memory but fetch from DB in small chunks
+    // To keep it simple: Fetch ALL history first (with small DB chunks), then process.
+    
     const history = await fetchHistoryForSymbols(symbols, targetDate, 160);
 
+    toast("Menghitung skor swing...");
+    
     const bySym = new Map();
     history.forEach(r => {
       if (!bySym.has(r.symbol)) bySym.set(r.symbol, []);
@@ -397,19 +397,30 @@ async function upsertSignals(signalRows) {
   }
 }
 
+// CRITICAL FIX: Fetch in small chunks to avoid API row limits
 async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) {
   const start = new Date(endDateISO);
   start.setDate(start.getDate() - lookbackDays);
   const startISO = start.toISOString().slice(0, 10);
   
   let all = [];
-  const CHUNK = 100;
+  // Reduce chunk size to 5 symbols. 
+  // 5 symbols * 160 days = 800 rows. Safe below 1000 limit.
+  const CHUNK = 5; 
+  
   for(let i=0; i<symbols.length; i+=CHUNK){
+    // Update progress UI
+    if (i % 50 === 0) {
+      const pct = Math.round((i / symbols.length) * 100);
+      toast(`Mengambil data histori: ${pct}%...`);
+    }
+
     const { data, error } = await sb.from("prices_daily")
       .select("trade_date,symbol,open,high,low,close,volume,foreign_buy,foreign_sell")
       .in("symbol", symbols.slice(i, i+CHUNK))
       .gte("trade_date", startISO).lte("trade_date", endDateISO)
       .order("trade_date", {ascending: true});
+      
     if(error) throw error;
     if(data) all = all.concat(data);
   }
@@ -498,10 +509,12 @@ function scoreSwing(series) {
   }
 
   let sc = 0, rs = [];
+  // Adaptive: Calculate score even if MA50 is missing
   if (M50) {
     if(C>M50) { sc+=15; rs.push("Uptrend (>MA50)"); }
     if(M20 && M20>M50) { sc+=10; rs.push("MA20>MA50"); }
   }
+  
   if(R>=45 && R<=70) { sc+=15; rs.push("RSI Sehat"); }
   else if(R>70) { sc-=8; rs.push("RSI Overbought"); }
   else if(R<40) { sc-=10; rs.push("RSI Weak"); }
@@ -563,16 +576,12 @@ function renderSignals(rows) {
 
 async function refreshSignals(){
   try {
-    // Priority: Uploaded File Date -> Latest DB Signal Date -> Latest DB Price Date
     let d = lastParsed.tradeDateISO; 
-    
-    // If no uploaded file (init state), fetch latest available date from DB
     if (!d) {
       latestDbDate = await fetchLatestTradeDate();
       d = latestDbDate;
     }
     
-    // Enable Analyze button if we have a valid date in DB
     if (d) {
        elBtnAnalyze.disabled = false;
        latestDbDate = d;
