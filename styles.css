@@ -188,10 +188,11 @@ input[type=range] { flex: 1; margin-left: 10px; accent-color: var(--primary); cu
 
 /* Column Alignment & Specifics */
 .col-reasons { min-width: 280px; text-align: left !important; white-space: normal !important; color: var(--text-muted); font-size: 12px; }
-.table th.col-reasons { text-align: center !important; } /* Header tetap tengah */
+.table th.col-reasons { text-align: center !important; min-width: 280px;} /* Header tetap tengah */
 
-.locked-cell { color: #cbd5e0; display: flex; align-items: center; width: 100%; height: 100%; }
-.table td.col-reasons .locked-cell { justify-content: flex-start; } /* Lock di reason rata kiri */
+.locked-cell { color: #cbd5e0; display: flex; align-items: center; justify-content: center !important; /* FORCE CENTER UNTUK GEMBOK */height: 100%; width: 100%; }
+.locked-icon { font-size: 14px; opacity: 0.7; }
+.table td.col-reasons { text-align: left !important; white-space: normal !important; line-height: 1.5; color: var(--text-muted); font-size: 12px; min-width: 280px; }
 .table td:not(.col-reasons) .locked-cell { justify-content: center; } /* Lock lainnya rata tengah */
 
 /* Badges */
