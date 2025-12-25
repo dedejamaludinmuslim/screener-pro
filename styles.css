@@ -165,10 +165,13 @@ input[type=range] { flex: 1; margin-left: 10px; accent-color: var(--primary); cu
 .table th {
   position: sticky; top: 0; 
   background: #f8fafc; color: var(--text-muted);
-  font-weight: 700; text-transform: uppercase; font-size: 11px;
-  padding: 12px; text-align: center;
+  font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;
+  padding: 14px 12px; text-align: center;
   border-bottom: 1px solid var(--border);
   white-space: nowrap; z-index: 20;
+  
+  cursor: default !important; 
+  pointer-events: none;      
 }
 
 .table td {
