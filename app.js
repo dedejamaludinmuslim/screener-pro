@@ -1,7 +1,8 @@
 /* =========================================================
-   Swing Signals Pro - Light Theme Logic
-   - Sidebar Toggle functionality added
-   - Clean render logic
+   Swing Signals Pro - Complete Logic
+   - Theme: Cool Slate (Light/Adem)
+   - Feature: CSV Upload, Supabase DB, Swing Calculation
+   - Auth: Simple Table Based
 ========================================================= */
 
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
@@ -93,7 +94,7 @@ function updateUIState() {
   renderSignals(cachedSignals);
 }
 
-elBtnLogin.onclick = () => { elModal.style.display = "flex"; toggleSidebar(false); } // Close sidebar on login click
+elBtnLogin.onclick = () => { elModal.style.display = "flex"; toggleSidebar(false); }
 $("btnCloseLogin").onclick = () => elModal.style.display = "none";
 elBtnLogout.onclick = () => {
   localStorage.removeItem("swing_auth");
@@ -176,7 +177,7 @@ function escapeHtml(str){ return String(str).replace(/[&<>"']/g, c => ({'&':'&am
 function num(x) { const n = Number(String(x || "").replace(/,/g, "")); return Number.isFinite(n) ? n : null; }
 function int(x) { return Math.trunc(num(x) || 0); }
 
-/* --- CORE FUNCTIONS --- */
+/* --- DATA PROCESSING --- */
 async function loadMetadata() { const { data } = await sb.from("symbols").select("symbol, sector, is_sharia"); if (data) { symbolMeta = {}; data.forEach(d => { symbolMeta[d.symbol] = d; }); } }
 function parseReasons(r) { if (Array.isArray(r)) return r; if (typeof r === 'string') { try { return JSON.parse(r); } catch { return [r]; } } return []; }
 
@@ -223,8 +224,6 @@ function renderSignals(rows) {
     const displayScore = isLoggedIn ? `<span class="${r.score >= 80 ? 'fw-bold highlight' : ''}">${fmt(r.score)}</span>` : lockIcon;
     const displaySignal = isLoggedIn ? `<span class="badge ${r.signal.toLowerCase()}">${r.signal}</span>` : lockIcon;
     const displayReasons = isLoggedIn ? escapeHtml(reasonsStr) : lockIcon;
-
-    // Reason Alignment Class logic (Override CSS)
     const reasonClass = (!isLoggedIn) ? "col-locked text-center" : "col-reasons";
 
     return `
@@ -260,41 +259,11 @@ elSearch.oninput = () => renderSignals(cachedSignals);
 elFilterSignal.onchange = () => renderSignals(cachedSignals);
 elFilterCategory.onchange = () => renderSignals(cachedSignals);
 
-/* --- DATA PROCESSING (SHORTENED FOR BREVITY - SAME LOGIC) --- */
-// (Bagian parsing CSV, Process Batch, Upsert Supabase, Calculation Logic tetap SAMA seperti sebelumnya
-//  hanya disesuaikan formatting toast/loggingnya)
-
-// ... [Copy paste logic CSV parsing & Calculation dari kode sebelumnya] ...
-// Agar kode tidak terlalu panjang di sini, pastikan fungsi: 
-// parseCSV, processBatchFiles, upsert*, fetch*, SMA, RSI, ATR, scoreSwing ADA.
-// Gunakan blok logika yang sama persis dari app.js versi sebelumnya untuk fungsi-fungsi kalkulasi tersebut.
-
-/* --- CALCULATION RE-INSERTION (Simplified for context) --- */
-function SMA(v, p) { const out = new Array(v.length).fill(null); let sum=0; for(let i=0;i<v.length;i++){ sum+=v[i]; if(i>=p) sum-=v[i-p]; if(i>=p-1) out[i]=sum/p; } return out; }
-function rollingMax(v, p) { const out = new Array(v.length).fill(null); for(let i=0;i<v.length;i++){ if(i<p-1) continue; let m=-Infinity; for(let j=i-p+1;j<=i;j++) m=Math.max(m, v[j]); out[i]=m; } return out; }
-function RSI(vals, p=14){ const out=new Array(vals.length).fill(null); let g=0, l=0; for(let i=1;i<=p;i++){ const d=vals[i]-vals[i-1]; if(d>0)g+=d; else l-=d; } g/=p; l/=p; out[p] = l===0?100:100-(100/(1+g/l)); for(let i=p+1;i<vals.length;i++){ const d=vals[i]-vals[i-1]; g=(g*(p-1)+(d>0?d:0))/p; l=(l*(p-1)+(d<0?-d:0))/p; out[i]=l===0?100:100-(100/(1+g/l)); } return out; }
-function ATR(h,l,c,p=14){ const tr=h.map((val,i)=>i===0?val-l[i]:Math.max(val-l[i], Math.abs(val-c[i-1]), Math.abs(l[i]-c[i-1]))); const out=new Array(c.length).fill(null); let s=0; for(let i=0;i<p;i++)s+=tr[i]; out[p-1]=s/p; for(let i=p;i<c.length;i++) out[i]=(out[i-1]*(p-1)+tr[i])/p; return out; }
-function scoreSwing(series) { 
-  const i=series.length-1, last=series[i], prev=series[i-1], C=last.close, V=last.volume||0, FNET=last.foreign_net||0;
-  const ma20=SMA(series.map(x=>x.close),20), ma50=SMA(series.map(x=>x.close),50), rsi=RSI(series.map(x=>x.close),14), atr=ATR(series.map(x=>x.high),series.map(x=>x.low),series.map(x=>x.close),14), vma=SMA(series.map(x=>x.volume||0),20), hh20=rollingMax(series.map(x=>x.high),20);
-  const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i], VR=(VM&&VM>0)?V/VM:0;
-  if(!R||!A) return { signal:"WAIT", score:0, reasons:["Data kurang"], metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} };
-  let sc=0, rs=[];
-  if(M50){ if(C>M50){sc+=15;rs.push("Uptrend");} if(M20&&M20>M50){sc+=10;rs.push("MA20>MA50");} }
-  if(R>=45&&R<=70){sc+=15;rs.push("RSI Sehat");} else if(R>70)sc-=8; else if(R<40)sc-=10;
-  if(H20&&C>=H20*0.995){sc+=20;rs.push("Breakout");}
-  if(VR>=1.3){sc+=15;rs.push(`Vol ${VR.toFixed(1)}x`);} else if(VR<0.8)sc-=6;
-  if(FNET>0){sc+=10;rs.push("Net Buy");} else if(FNET<0)sc-=5;
-  if(prev&&C>prev.close)sc+=3;
-  let sig="WAIT"; if(sc>=65)sig="BUY"; else if(sc<=30)sig="SELL"; if(M20&&C<M20&&R<45){sig="SELL";rs.unshift("CutLoss");}
-  return { signal:sig, score:Math.max(0,Math.min(100,Math.round(sc))), reasons:rs, metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} };
-}
-
+/* --- CSV & FILE HANDLING --- */
 function parseCSV(text) { const rows = [], len = text.length; let row = [], field = "", inQuotes = false; for (let i = 0; i < len; i++) { const c = text[i]; if (inQuotes) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; } else field += c; } else { if (c === '"') inQuotes = true; else if (c === ',') { row.push(field); field = ""; } else if (c === '\n') { row.push(field.replace(/\r$/, "")); field = ""; if (row.some(v => v !== "")) rows.push(row); row = []; } else field += c; } } if (field || row.length) { row.push(field.replace(/\r$/, "")); if (row.some(v => v !== "")) rows.push(row); } return rows; }
 const MONTH_ID = { jan: "01", januari: "01", feb: "02", februari: "02", mar: "03", maret: "03", apr: "04", april: "04", mei: "05", jun: "06", juni: "06", jul: "07", juli: "07", agu: "08", agustus: "08", agt: "08", sep: "09", september: "09", okt: "10", oktober: "10", nov: "11", november: "11", des: "12", desember: "12" };
 function parseIDXDateToISO(s) { if (!s) return null; const raw = String(s).trim().replace(/\s+/g, " "); if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw; const parts = raw.split(" "); if (parts.length < 3) return null; const d = parts[0].padStart(2, "0"); const m = MONTH_ID[parts[1].toLowerCase()] || MONTH_ID[parts[1].slice(0,3).toLowerCase()]; if (!m) return null; return `${parts[2]}-${m}-${d}`; }
 
-// --- FILE HANDLERS (Simplified Callbacks) ---
 async function processBatchFiles(files) {
   let allRows = [], foundDates = new Set();
   let detectedType = null;
@@ -336,12 +305,38 @@ elFileInput.onchange = async (e) => {
 elBtnConvert.onclick = async () => { if (!tempXlsxFiles.length) return; try { toast(`Konversi ${tempXlsxFiles.length} XLSX...`); const zip = new JSZip(); const convertedCsvBlobs = []; for (const file of tempXlsxFiles) { const data = await file.arrayBuffer(); const workbook = XLSX.read(data); const firstSheet = workbook.Sheets[workbook.SheetNames[0]]; const csvOutput = XLSX.utils.sheet_to_csv(firstSheet); const csvName = file.name.replace(/\.xlsx$/i, ".csv"); zip.file(csvName, csvOutput); convertedCsvBlobs.push(new File([csvOutput], csvName, { type: "text/csv" })); } const zipContent = await zip.generateAsync({ type: "blob" }); const url = URL.createObjectURL(zipContent); const a = document.createElement("a"); a.href = url; a.download = `Converted_${new Date().toISOString().slice(0,10)}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); await processBatchFiles(convertedCsvBlobs); tempXlsxFiles = []; elBtnConvert.disabled = true; } catch (err) { console.error(err); toast("Gagal konversi", true); } };
 elBtnUpload.onclick = async () => { try { const { rows, type } = lastParsed; if (!rows.length) return; if (type === 'meta') { toast("Update Info..."); await sb.from("symbols").upsert(rows, { onConflict: "symbol" }); toast("Info Updated!"); await loadMetadata(); } else { toast("Upload Harga..."); await upsertSymbols(rows); await upsertPrices(rows); toast("Harga Updated."); } elBtnUpload.disabled = true; if (type === 'price') await refreshSignals(); } catch(err) { console.error(err); toast("Upload gagal", true); } };
 elBtnAnalyze.onclick = async () => { try { let targetDate = lastParsed.tradeDateISO; if (!targetDate) targetDate = latestDbDate; if (!targetDate) { toast("No Date", true); return; } let symbols = []; const { data } = await sb.from("prices_daily").select("symbol").eq("trade_date", targetDate); symbols = data.map(s => s.symbol); if (symbols.length === 0) { toast("No symbols", true); return; } toast(`Analisis ${symbols.length} emiten...`); const history = await fetchHistoryForSymbols(symbols, targetDate, 160); toast("Scoring..."); const bySym = new Map(); history.forEach(r => { if (!bySym.has(r.symbol)) bySym.set(r.symbol, []); const fNet = (Number(r.foreign_buy) || 0) - (Number(r.foreign_sell) || 0); bySym.get(r.symbol).push({ ...r, foreign_net: fNet }); }); const out = []; for (const [sym, series] of bySym.entries()) { series.sort((a,b) => a.trade_date.localeCompare(b.trade_date)); if (series[series.length - 1]?.trade_date !== targetDate) continue; const res = scoreSwing(series); const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val; out.push({ trade_date: targetDate, symbol: sym, strategy: "SWING_V1", signal: res.signal, score: res.score, reasons: res.reasons, close: safe(res.metrics.close), rsi14: safe(res.metrics.rsi14), ma20: safe(res.metrics.ma20), ma50: safe(res.metrics.ma50), atr14: safe(res.metrics.atr14), vol_ratio: safe(res.metrics.vol_ratio), foreign_net: safe(res.metrics.foreign_net) }); } toast(`Simpan ${out.length} sinyal...`); await upsertSignals(out); cachedSignals = []; toast("Selesai."); await refreshSignals(); } catch(err) { console.error(err); toast("Analisis Error", true); } };
+
+/* --- CALCULATION UTILS --- */
+function SMA(v, p) { const out = new Array(v.length).fill(null); let sum=0; for(let i=0;i<v.length;i++){ sum+=v[i]; if(i>=p) sum-=v[i-p]; if(i>=p-1) out[i]=sum/p; } return out; }
+function rollingMax(v, p) { const out = new Array(v.length).fill(null); for(let i=0;i<v.length;i++){ if(i<p-1) continue; let m=-Infinity; for(let j=i-p+1;j<=i;j++) m=Math.max(m, v[j]); out[i]=m; } return out; }
+function RSI(vals, p=14){ const out=new Array(vals.length).fill(null); let g=0, l=0; for(let i=1;i<=p;i++){ const d=vals[i]-vals[i-1]; if(d>0)g+=d; else l-=d; } g/=p; l/=p; out[p] = l===0?100:100-(100/(1+g/l)); for(let i=p+1;i<vals.length;i++){ const d=vals[i]-vals[i-1]; g=(g*(p-1)+(d>0?d:0))/p; l=(l*(p-1)+(d<0?-d:0))/p; out[i]=l===0?100:100-(100/(1+g/l)); } return out; }
+function ATR(h,l,c,p=14){ const tr=h.map((val,i)=>i===0?val-l[i]:Math.max(val-l[i], Math.abs(val-c[i-1]), Math.abs(l[i]-c[i-1]))); const out=new Array(c.length).fill(null); let s=0; for(let i=0;i<p;i++)s+=tr[i]; out[p-1]=s/p; for(let i=p;i<c.length;i++) out[i]=(out[i-1]*(p-1)+tr[i])/p; return out; }
+function scoreSwing(series) { const i=series.length-1, last=series[i], prev=series[i-1], C=last.close, V=last.volume||0, FNET=last.foreign_net||0; const ma20=SMA(series.map(x=>x.close),20), ma50=SMA(series.map(x=>x.close),50), rsi=RSI(series.map(x=>x.close),14), atr=ATR(series.map(x=>x.high),series.map(x=>x.low),series.map(x=>x.close),14), vma=SMA(series.map(x=>x.volume||0),20), hh20=rollingMax(series.map(x=>x.high),20); const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i], VR=(VM&&VM>0)?V/VM:0; if(!R||!A) return { signal:"WAIT", score:0, reasons:["Data kurang"], metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} }; let sc=0, rs=[]; if(M50){ if(C>M50){sc+=15;rs.push("Uptrend");} if(M20&&M20>M50){sc+=10;rs.push("MA20>MA50");} } if(R>=45&&R<=70){sc+=15;rs.push("RSI Sehat");} else if(R>70)sc-=8; else if(R<40)sc-=10; if(H20&&C>=H20*0.995){sc+=20;rs.push("Breakout");} if(VR>=1.3){sc+=15;rs.push(`Vol ${VR.toFixed(1)}x`);} else if(VR<0.8)sc-=6; if(FNET>0){sc+=10;rs.push("Net Buy");} else if(FNET<0)sc-=5; if(prev&&C>prev.close)sc+=3; let sig="WAIT"; if(sc>=65)sig="BUY"; else if(sc<=30)sig="SELL"; if(M20&&C<M20&&R<45){sig="SELL";rs.unshift("CutLoss");} return { signal:sig, score:Math.max(0,Math.min(100,Math.round(sc))), reasons:rs, metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} }; }
+
+/* --- SUPABASE FETCH & UPSERT --- */
 async function upsertSymbols(rows) { const unique = new Map(); rows.forEach(r => unique.set(r.symbol, { symbol: r.symbol, name: r.name })); await sb.from("symbols").upsert([...unique.values()], { onConflict: "symbol" }); }
 async function upsertPrices(rows) { const CHUNK = 500; for (let i = 0; i < rows.length; i += CHUNK) { const part = rows.slice(i, i + CHUNK).map(r => ({ trade_date: r.trade_date, symbol: r.symbol, name: r.name, prev: r.prev, open: r.open, high: r.high, low: r.low, close: r.close, chg: r.chg, volume: r.volume, value: r.value, freq: r.freq, foreign_buy: r.foreign_buy || 0, foreign_sell: r.foreign_sell || 0 })); await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" }); } }
 async function upsertSignals(signalRows) { const CHUNK = 500; for (let i = 0; i < signalRows.length; i += CHUNK) { await sb.from("signals_daily").upsert(signalRows.slice(i, i + CHUNK), { onConflict: "trade_date,symbol,strategy" }); } }
 async function fetchHistoryForSymbols(symbols, endDateISO, lookbackDays) { const start = new Date(endDateISO); start.setDate(start.getDate() - lookbackDays); const startISO = start.toISOString().slice(0, 10); let all = []; const CHUNK = 5; for(let i=0; i<symbols.length; i+=CHUNK){ if (i % 50 === 0) toast(`Fetch history: ${Math.round((i / symbols.length) * 100)}%`); const { data } = await sb.from("prices_daily").select("trade_date,symbol,open,high,low,close,volume,foreign_buy,foreign_sell").in("symbol", symbols.slice(i, i+CHUNK)).gte("trade_date", startISO).lte("trade_date", endDateISO).order("trade_date", {ascending: true}); if(data) all = all.concat(data); } return all; }
 async function fetchLatestTradeDate() { const { data } = await sb.from("prices_daily").select("trade_date").order("trade_date", {ascending:false}).limit(1); return data?.[0]?.trade_date; }
 async function fetchSignalsLatest(dateISO) { const { data } = await sb.from("signals_daily").select("symbol,signal,score,reasons,close,rsi14,ma20,ma50,vol_ratio,foreign_net").eq("trade_date", dateISO).eq("strategy", "SWING_V1").order("score", { ascending: false }).limit(2000); return data || []; }
+
+async function refreshSignals(){
+  try {
+    checkAuth();
+    await loadMetadata();
+    let d = lastParsed.tradeDateISO; 
+    if (!d) { latestDbDate = await fetchLatestTradeDate(); d = latestDbDate; }
+    if (d) { elBtnAnalyze.disabled = false; latestDbDate = d; }
+    if(!d){ toast("Belum ada data."); return; }
+    elPillDate.textContent = d;
+    toast(`Memuat data: ${d}...`);
+    cachedSignals = await fetchSignalsLatest(d);
+    if (cachedSignals.length > 0) { toast(`Ready.`); elPillRows.textContent = cachedSignals.length.toLocaleString() + " Emiten (DB)"; } 
+    else { toast(`Data ${d} siap dianalisis.`, true); elPillRows.textContent = "0 (Perlu Analisis)"; }
+    renderSignals(cachedSignals);
+  } catch(e) { console.error(e); toast("Error load", true); }
+}
 
 toast("System Ready.");
 refreshSignals();
