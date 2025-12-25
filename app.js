@@ -1,8 +1,9 @@
 /* =========================================================
-   Swing Signals Pro - Final Polish
-   - Fix: Reasons Column Alignment (Header Center, Body Left)
-   - Fix: Remove Sharia Icon
-   - Fix: Consistent Layout (Locked vs Unlocked)
+   Swing Signals Pro - Complete Logic (Fixed)
+   - Theme: Cool Slate (Light/Adem)
+   - Feature: CSV Upload, Supabase DB, Swing Calculation
+   - Fix: scoreSwing function included
+   - Fix: Lock Alignment
 ========================================================= */
 
 const SUPABASE_URL = "https://pbhfwdbgoejduzjvezrk.supabase.co";
@@ -145,7 +146,6 @@ const COLS = [
   { key: "sector", label: "Sektor", type: "text" },
   { key: "score", label: "Score", type: "num", locked: true },
   { key: "signal", label: "Signal", type: "text", locked: true },
-  // REVISI: Label jadi "Keterangan", Class tetap 'col-reasons'
   { key: "reasons", label: "Keterangan", type: "text", locked: true, className: "col-reasons" },
 ];
 
@@ -183,7 +183,7 @@ function parseReasons(r) { if (Array.isArray(r)) return r; if (typeof r === 'str
 function renderSignals(rows) {
   const thead = elSignals.querySelector("thead");
   thead.innerHTML = "<tr>" + COLS.map(c => {
-    // REVISI: Pastikan class CSS selalu dipakai, tidak peduli login/tidak (agar lebar konsisten)
+    // Gunakan class css yang sudah kita atur (termasuk .col-reasons yang sekarang text-align:left, tapi lock-nya center)
     const classes = [c.className || "", (!isLoggedIn && c.locked) ? "col-locked" : "sortable"].join(" ");
     const onClick = (!isLoggedIn && c.locked) ? "" : `setSort('${c.key}')`;
     return `<th class="${classes}" onclick="${onClick}">${c.label} ${sortBadgeFor(c.key)}</th>`;
@@ -217,16 +217,14 @@ function renderSignals(rows) {
     const isNew = isWl && (watchlist[r.symbol] === todayISO || watchlist[r.symbol] === latestDbDate);
     const meta = symbolMeta[r.symbol] || { sector: "-", is_sharia: false };
     
-    // REVISI: Hapus Sharia Badge (Ikon Masjid)
-    // const shariaBadge = meta.is_sharia ? ... -> dihapus
-
-    const lockIcon = `<span class="locked-cell">🔒</span>`;
+    // Lock Icon (Div center)
+    const lockIcon = `<span class="locked-cell"><span class="locked-icon">🔒</span></span>`;
     
     const displayScore = isLoggedIn ? `<span class="${r.score >= 80 ? 'fw-bold highlight' : ''}">${fmt(r.score)}</span>` : lockIcon;
     const displaySignal = isLoggedIn ? `<span class="badge ${r.signal.toLowerCase()}">${r.signal}</span>` : lockIcon;
     const displayReasons = isLoggedIn ? escapeHtml(reasonsStr) : lockIcon;
-
-    // REVISI: Selalu gunakan class 'col-reasons' agar text-align LEFT, bahkan saat terkunci
+    
+    // Class selalu col-reasons agar text left
     const reasonClass = "col-reasons";
 
     return `
@@ -235,7 +233,9 @@ function renderSignals(rows) {
         <button class="star-btn ${isWl?'active':''}" onclick="toggleWatchlist('${r.symbol}')">★</button>
         ${isNew ? '<span class="new-tag">NEW</span>' : ''}
       </td>
-      <td class="col-symbol">${escapeHtml(r.symbol)}</td> <td>${fmt(r.close)}</td>
+      <td class="col-symbol">${escapeHtml(r.symbol)}</td>
+      
+      <td>${fmt(r.close)}</td>
       <td>${fmt2(r.rsi14)}</td>
       <td>${fmt2(r.ma20)}</td>
       <td>${fmt2(r.ma50)}</td>
@@ -250,7 +250,39 @@ function renderSignals(rows) {
   }).join("") || "<tr><td colspan='12' style='text-align:center; padding:20px; color:#94a3b8'>Data kosong / Tidak sesuai filter</td></tr>";
 }
 
-/* --- STANDARD EVENT HANDLERS --- */
+/* --- CALCULATION LOGIC (FIXED: INCLUDED) --- */
+function SMA(v, p) { const out = new Array(v.length).fill(null); let sum=0; for(let i=0;i<v.length;i++){ sum+=v[i]; if(i>=p) sum-=v[i-p]; if(i>=p-1) out[i]=sum/p; } return out; }
+function rollingMax(v, p) { const out = new Array(v.length).fill(null); for(let i=0;i<v.length;i++){ if(i<p-1) continue; let m=-Infinity; for(let j=i-p+1;j<=i;j++) m=Math.max(m, v[j]); out[i]=m; } return out; }
+function RSI(vals, p=14){ const out=new Array(vals.length).fill(null); let g=0, l=0; for(let i=1;i<=p;i++){ const d=vals[i]-vals[i-1]; if(d>0)g+=d; else l-=d; } g/=p; l/=p; out[p] = l===0?100:100-(100/(1+g/l)); for(let i=p+1;i<vals.length;i++){ const d=vals[i]-vals[i-1]; g=(g*(p-1)+(d>0?d:0))/p; l=(l*(p-1)+(d<0?-d:0))/p; out[i]=l===0?100:100-(100/(1+g/l)); } return out; }
+function ATR(h,l,c,p=14){ const tr=h.map((val,i)=>i===0?val-l[i]:Math.max(val-l[i], Math.abs(val-c[i-1]), Math.abs(l[i]-c[i-1]))); const out=new Array(c.length).fill(null); let s=0; for(let i=0;i<p;i++)s+=tr[i]; out[p-1]=s/p; for(let i=p;i<c.length;i++) out[i]=(out[i-1]*(p-1)+tr[i])/p; return out; }
+
+function scoreSwing(series) { 
+  const i=series.length-1, last=series[i], prev=series[i-1], C=last.close, V=last.volume||0, FNET=last.foreign_net||0;
+  const ma20=SMA(series.map(x=>x.close),20), ma50=SMA(series.map(x=>x.close),50), rsi=RSI(series.map(x=>x.close),14), atr=ATR(series.map(x=>x.high),series.map(x=>x.low),series.map(x=>x.close),14), vma=SMA(series.map(x=>x.volume||0),20), hh20=rollingMax(series.map(x=>x.high),20);
+  const M20=ma20[i], M50=ma50[i], R=rsi[i], A=atr[i], VM=vma[i], H20=hh20[i], VR=(VM&&VM>0)?V/VM:0;
+  
+  if(!R||!A) return { signal:"WAIT", score:0, reasons:["Data kurang"], metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} };
+  
+  let sc=0, rs=[];
+  if(M50){ if(C>M50){sc+=15;rs.push("Uptrend");} if(M20&&M20>M50){sc+=10;rs.push("MA20>MA50");} }
+  if(R>=45&&R<=70){sc+=15;rs.push("RSI Sehat");} else if(R>70)sc-=8; else if(R<40)sc-=10;
+  if(H20&&C>=H20*0.995){sc+=20;rs.push("Breakout");}
+  if(VR>=1.3){sc+=15;rs.push(`Vol ${VR.toFixed(1)}x`);} else if(VR<0.8)sc-=6;
+  if(FNET>0){sc+=10;rs.push("Net Buy");} else if(FNET<0)sc-=5;
+  if(prev&&C>prev.close)sc+=3;
+  
+  let sig="WAIT"; if(sc>=65)sig="BUY"; else if(sc<=30)sig="SELL"; 
+  if(M20&&C<M20&&R<45){sig="SELL";rs.unshift("CutLoss");}
+  
+  return { 
+    signal:sig, 
+    score:Math.max(0,Math.min(100,Math.round(sc))), 
+    reasons:rs, 
+    metrics:{close:C,rsi14:R,ma20:M20,ma50:M50,atr14:A,vol_ratio:VR,foreign_net:FNET} 
+  };
+}
+
+/* --- EVENT HANDLERS --- */
 elScoreSlider.oninput = (e) => { 
   if (!isLoggedIn && e.target.value > 30) e.target.value = 30; 
   elScoreVal.textContent = e.target.value; 
@@ -305,7 +337,56 @@ elFileInput.onchange = async (e) => {
 };
 elBtnConvert.onclick = async () => { if (!tempXlsxFiles.length) return; try { toast(`Konversi ${tempXlsxFiles.length} XLSX...`); const zip = new JSZip(); const convertedCsvBlobs = []; for (const file of tempXlsxFiles) { const data = await file.arrayBuffer(); const workbook = XLSX.read(data); const firstSheet = workbook.Sheets[workbook.SheetNames[0]]; const csvOutput = XLSX.utils.sheet_to_csv(firstSheet); const csvName = file.name.replace(/\.xlsx$/i, ".csv"); zip.file(csvName, csvOutput); convertedCsvBlobs.push(new File([csvOutput], csvName, { type: "text/csv" })); } const zipContent = await zip.generateAsync({ type: "blob" }); const url = URL.createObjectURL(zipContent); const a = document.createElement("a"); a.href = url; a.download = `Converted_${new Date().toISOString().slice(0,10)}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); await processBatchFiles(convertedCsvBlobs); tempXlsxFiles = []; elBtnConvert.disabled = true; } catch (err) { console.error(err); toast("Gagal konversi", true); } };
 elBtnUpload.onclick = async () => { try { const { rows, type } = lastParsed; if (!rows.length) return; if (type === 'meta') { toast("Update Info..."); await sb.from("symbols").upsert(rows, { onConflict: "symbol" }); toast("Info Updated!"); await loadMetadata(); } else { toast("Upload Harga..."); await upsertSymbols(rows); await upsertPrices(rows); toast("Harga Updated."); } elBtnUpload.disabled = true; if (type === 'price') await refreshSignals(); } catch(err) { console.error(err); toast("Upload gagal", true); } };
-elBtnAnalyze.onclick = async () => { try { let targetDate = lastParsed.tradeDateISO; if (!targetDate) targetDate = latestDbDate; if (!targetDate) { toast("No Date", true); return; } let symbols = []; const { data } = await sb.from("prices_daily").select("symbol").eq("trade_date", targetDate); symbols = data.map(s => s.symbol); if (symbols.length === 0) { toast("No symbols", true); return; } toast(`Analisis ${symbols.length} emiten...`); const history = await fetchHistoryForSymbols(symbols, targetDate, 160); toast("Scoring..."); const bySym = new Map(); history.forEach(r => { if (!bySym.has(r.symbol)) bySym.set(r.symbol, []); const fNet = (Number(r.foreign_buy) || 0) - (Number(r.foreign_sell) || 0); bySym.get(r.symbol).push({ ...r, foreign_net: fNet }); }); const out = []; for (const [sym, series] of bySym.entries()) { series.sort((a,b) => a.trade_date.localeCompare(b.trade_date)); if (series[series.length - 1]?.trade_date !== targetDate) continue; const res = scoreSwing(series); const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val; out.push({ trade_date: targetDate, symbol: sym, strategy: "SWING_V1", signal: res.signal, score: res.score, reasons: res.reasons, close: safe(res.metrics.close), rsi14: safe(res.metrics.rsi14), ma20: safe(res.metrics.ma20), ma50: safe(res.metrics.ma50), atr14: safe(res.metrics.atr14), vol_ratio: safe(res.metrics.vol_ratio), foreign_net: safe(res.metrics.foreign_net) }); } toast(`Simpan ${out.length} sinyal...`); await upsertSignals(out); cachedSignals = []; toast("Selesai."); await refreshSignals(); } catch(err) { console.error(err); toast("Analisis Error", true); } };
+elBtnAnalyze.onclick = async () => { 
+  try { 
+    let targetDate = lastParsed.tradeDateISO; 
+    if (!targetDate) targetDate = latestDbDate; 
+    if (!targetDate) { toast("No Date", true); return; } 
+    
+    let symbols = []; 
+    const { data } = await sb.from("prices_daily").select("symbol").eq("trade_date", targetDate); 
+    symbols = data.map(s => s.symbol); 
+    
+    if (symbols.length === 0) { toast("No symbols", true); return; } 
+    toast(`Analisis ${symbols.length} emiten...`); 
+    
+    const history = await fetchHistoryForSymbols(symbols, targetDate, 160); 
+    toast("Scoring..."); 
+    
+    const bySym = new Map(); 
+    history.forEach(r => { 
+      if (!bySym.has(r.symbol)) bySym.set(r.symbol, []); 
+      const fNet = (Number(r.foreign_buy) || 0) - (Number(r.foreign_sell) || 0); 
+      bySym.get(r.symbol).push({ ...r, foreign_net: fNet }); 
+    }); 
+    
+    const out = []; 
+    for (const [sym, series] of bySym.entries()) { 
+      series.sort((a,b) => a.trade_date.localeCompare(b.trade_date)); 
+      if (series[series.length - 1]?.trade_date !== targetDate) continue; 
+      
+      const res = scoreSwing(series); // FUNGSI INI SUDAH ADA SEKARANG
+      
+      const safe = (val) => (val === null || val === undefined || !Number.isFinite(val)) ? null : val; 
+      out.push({ 
+        trade_date: targetDate, symbol: sym, strategy: "SWING_V1", 
+        signal: res.signal, score: res.score, reasons: res.reasons, 
+        close: safe(res.metrics.close), rsi14: safe(res.metrics.rsi14), 
+        ma20: safe(res.metrics.ma20), ma50: safe(res.metrics.ma50), 
+        atr14: safe(res.metrics.atr14), vol_ratio: safe(res.metrics.vol_ratio), 
+        foreign_net: safe(res.metrics.foreign_net) 
+      }); 
+    } 
+    toast(`Simpan ${out.length} sinyal...`); 
+    await upsertSignals(out); 
+    cachedSignals = []; 
+    toast("Selesai."); 
+    await refreshSignals(); 
+  } catch(err) { 
+    console.error(err); 
+    toast("Analisis Error: " + err.message, true); 
+  } 
+};
 async function upsertSymbols(rows) { const unique = new Map(); rows.forEach(r => unique.set(r.symbol, { symbol: r.symbol, name: r.name })); await sb.from("symbols").upsert([...unique.values()], { onConflict: "symbol" }); }
 async function upsertPrices(rows) { const CHUNK = 500; for (let i = 0; i < rows.length; i += CHUNK) { const part = rows.slice(i, i + CHUNK).map(r => ({ trade_date: r.trade_date, symbol: r.symbol, name: r.name, prev: r.prev, open: r.open, high: r.high, low: r.low, close: r.close, chg: r.chg, volume: r.volume, value: r.value, freq: r.freq, foreign_buy: r.foreign_buy || 0, foreign_sell: r.foreign_sell || 0 })); await sb.from("prices_daily").upsert(part, { onConflict: "trade_date,symbol" }); } }
 async function upsertSignals(signalRows) { const CHUNK = 500; for (let i = 0; i < signalRows.length; i += CHUNK) { await sb.from("signals_daily").upsert(signalRows.slice(i, i + CHUNK), { onConflict: "trade_date,symbol,strategy" }); } }
