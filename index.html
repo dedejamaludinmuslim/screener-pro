@@ -7,50 +7,72 @@
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://unpkg.com/lucide@latest"></script> <link rel="stylesheet" href="./styles.css" />
 </head>
 
 <body>
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand">
+    <div class="mobile-header">
+      <div class="brand-mobile">
         <div class="logo">Σ</div>
-        <div class="brand-text">Swing<br><span class="highlight">Pro</span></div>
+        <span class="brand-text">Swing<span class="highlight">Pro</span></span>
+      </div>
+      <button id="btnMobileMenu" class="icon-btn"><i data-lucide="menu"></i></button>
+    </div>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="logo">Σ</div>
+          <div class="brand-text">Swing<br><span class="highlight">Pro</span></div>
+        </div>
+        <button id="btnCloseMenu" class="icon-btn mobile-only"><i data-lucide="x"></i></button>
       </div>
       
       <div class="stats-panel">
-        <div class="stat-item">
-          <div class="label">DATE</div>
-          <div class="value mono" id="pillDate">-</div>
+        <div class="stat-row">
+          <div class="stat-item">
+            <span class="label">MARKET DATE</span>
+            <span class="value mono" id="pillDate">-</span>
+          </div>
+          <div class="stat-item">
+             <span class="label">SYSTEM</span>
+             <span class="value" id="pillStatus">Ready</span>
+          </div>
         </div>
-        <div class="stat-item">
-          <div class="label">ROWS</div>
-          <div class="value mono" id="pillRows">-</div>
-        </div>
-        <div class="stat-item">
-           <div class="label">STATUS</div>
-           <div class="value" id="pillStatus">Ready</div>
+        <div class="stat-item full">
+          <span class="label">DATA ROWS</span>
+          <span class="value mono" id="pillRows">-</span>
         </div>
       </div>
 
       <div class="control-area">
-        <div id="adminControls" class="admin-buttons" style="display:none;">
+        <div id="adminControls" class="admin-section" style="display:none;">
+          <div class="section-title">ADMIN TOOLS</div>
           <label class="btn-primary-upload">
             <input id="fileInput" type="file" multiple accept=".csv,.xlsx" />
-            <span>📂 Upload</span>
+            <i data-lucide="upload-cloud" size="14"></i> <span>Select Files</span>
           </label>
-          <button id="btnConvert" class="btn-ghost" disabled>Convert</button>
-          <button id="btnUpload" class="btn-ghost" disabled>Push DB</button>
-          <button id="btnAnalyze" class="btn-action" disabled>📊 Analisis</button>
+          <div class="btn-group">
+            <button id="btnConvert" class="btn-ghost" disabled>Convert</button>
+            <button id="btnUpload" class="btn-ghost" disabled>Push DB</button>
+          </div>
+          <button id="btnAnalyze" class="btn-action pulse" disabled>
+            <i data-lucide="activity" size="16"></i> Run Analysis
+          </button>
         </div>
 
-        <div class="auth-buttons">
-          <button id="btnLogin" class="btn-action btn-login">🔐 Masuk </button>
-          <button id="btnLogout" class="btn-action btn-logout" style="display:none;">🔓 Keluar</button>
+        <div class="auth-section">
+          <button id="btnLogin" class="btn-action btn-login">
+            <i data-lucide="lock" size="14"></i> Login Admin
+          </button>
+          <button id="btnLogout" class="btn-action btn-logout" style="display:none;">
+            <i data-lucide="log-out" size="14"></i> Logout
+          </button>
         </div>
       </div>
     </aside>
@@ -58,59 +80,75 @@
     <main class="main">
       <header class="toolbar">
         <div class="tool-section start">
-          <div class="input-wrap">
-            <span class="icon">🔍</span>
-            <input id="search" placeholder="Cari emiten..." />
+          <div class="search-wrap">
+            <i data-lucide="search" class="search-icon"></i>
+            <input id="search" placeholder="Search symbol..." autocomplete="off" />
           </div>
         </div>
 
         <div class="tool-section center">
           <div class="filter-group">
-            <select id="filterSignal">
-              <option value="ALL">Sinyal: Semua</option>
-              <option value="BUY">Sinyal: BUY</option>
-              <option value="SELL">Sinyal: SELL</option>
-              <option value="WAIT">Sinyal: WAIT</option>
-              <option value="WATCHLIST">★ Watchlist</option>
-            </select>
-            <select id="filterCategory">
-              <option value="ALL">Tipe: Semua</option>
-              <option value="SHARIA">🕌 Syariah</option>
-              <option value="NON">🏢 Non-Syariah</option>
-            </select>
+            <div class="select-wrapper">
+              <select id="filterSignal">
+                <option value="ALL">All Signals</option>
+                <option value="BUY">Strong Buy</option>
+                <option value="SELL">Sell / Avoid</option>
+                <option value="WAIT">Wait</option>
+                <option value="WATCHLIST">★ Watchlist</option>
+              </select>
+            </div>
+            <div class="select-wrapper">
+              <select id="filterCategory">
+                <option value="ALL">All Sectors</option>
+                <option value="SHARIA">Syariah Only</option>
+                <option value="NON">Non-Syariah</option>
+              </select>
+            </div>
           </div>
         </div>
 
         <div class="tool-section end">
-          <div class="slider-group">
-            <label>Min Score: <span id="scoreVal" class="mono highlight">0</span></label>
+          <div class="slider-wrapper">
+            <div class="slider-header">
+              <span class="label">Min Score</span>
+              <span id="scoreVal" class="val">0</span>
+            </div>
             <input type="range" id="scoreSlider" min="0" max="95" value="0" step="5">
           </div>
         </div>
       </header>
 
-      <div class="table-container">
-        <table class="table" id="signalsTable">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
+      <div class="table-wrapper">
+        <div class="table-container">
+          <table class="table" id="signalsTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </main>
   </div>
 
   <div id="loginModal" class="modal-overlay" style="display:none;">
     <div class="modal-content">
-      <h3>Login Admin</h3>
-      <input type="text" id="username" placeholder="Username" class="modal-input">
-      <input type="password" id="password" placeholder="Password" class="modal-input">
+      <div class="modal-header">
+        <i data-lucide="shield-check" size="32" class="modal-icon"></i>
+        <h3>Security Access</h3>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="username" placeholder="Username" class="modal-input">
+        <input type="password" id="password" placeholder="Password" class="modal-input">
+      </div>
       <div class="modal-actions">
-        <button id="btnSubmitLogin" class="btn-action">Masuk</button>
-        <button id="btnCloseLogin" class="btn-ghost">Batal</button>
+        <button id="btnCloseLogin" class="btn-ghost">Cancel</button>
+        <button id="btnSubmitLogin" class="btn-action">Authenticate</button>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./app.js"></script>
+  <script>lucide.createIcons();</script>
 </body>
 </html>
+
